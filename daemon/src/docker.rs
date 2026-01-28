@@ -81,8 +81,8 @@ impl DockerManager {
                 .unwrap_or_else(|_| "/data/raptor".into()));
         let volume_path = format!("{}/volumes/{}", base_path, name);
 
-        // Create the volume directory if it doesn't exist
-        if let Err(e) = std::fs::create_dir_all(&volume_path) {
+        // Create the volume directory if it doesn't exist (using tokio::fs to avoid blocking)
+        if let Err(e) = tokio::fs::create_dir_all(&volume_path).await {
             tracing::warn!("Failed to create volume directory {}: {}", volume_path, e);
         }
 
@@ -222,53 +222,26 @@ impl DockerManager {
         Ok(())
     }
 
-    /// Gracefully stop container by sending a stop command first, then force kill after timeout
-    pub async fn graceful_stop(&self, id: &str, stop_command: Option<&str>, timeout_secs: u64) -> anyhow::Result<()> {
-        // If a stop command is provided, try to send it first
+    /// Gracefully stop container by sending a stop command
+    /// We ONLY send the command and let the server shut down on its own
+    /// This allows the log stream to capture all shutdown logs naturally
+    pub async fn graceful_stop(&self, id: &str, stop_command: Option<&str>, _timeout_secs: u64) -> anyhow::Result<()> {
         if let Some(cmd) = stop_command {
             tracing::info!("Sending stop command '{}' to container {}", cmd, id);
 
-            // Try to send the stop command
-            if let Err(e) = self.send_command(id, cmd).await {
-                tracing::warn!("Failed to send stop command: {}, proceeding with docker stop", e);
-            } else {
-                // Wait for container to stop gracefully
-                let start = std::time::Instant::now();
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Send the stop command - the server will shut down on its own
+            // The log stream will continue to show all shutdown logs
+            self.send_command(id, cmd).await?;
 
-                    // Check if container is still running
-                    match self.get_container(id).await {
-                        Ok(info) => {
-                            let state = info.state.to_lowercase();
-                            if state != "running" {
-                                tracing::info!("Container {} stopped gracefully", id);
-                                return Ok(());
-                            }
-                        }
-                        Err(_) => {
-                            // Container might be gone
-                            tracing::info!("Container {} no longer exists", id);
-                            return Ok(());
-                        }
-                    }
-
-                    // Check timeout
-                    if start.elapsed().as_secs() >= timeout_secs {
-                        tracing::warn!("Container {} did not stop within {} seconds, force killing", id, timeout_secs);
-                        break;
-                    }
-                }
-            }
+            // Don't call Docker stop - let the server shut down gracefully
+            // The log stream will show "Saving worlds...", "Server stopped", etc.
+            tracing::info!("Stop command sent to container {}, waiting for graceful shutdown", id);
+        } else {
+            // No stop command provided, use Docker's stop
+            tracing::info!("No stop command configured, using Docker stop for container {}", id);
+            self.stop_container(id).await?;
         }
 
-        // Force stop/kill the container
-        if let Err(e) = self.docker.stop_container(id, Some(StopContainerOptions { t: 5 })).await {
-            tracing::warn!("Stop failed, trying kill: {}", e);
-            self.docker.kill_container::<String>(id, None).await?;
-        }
-
-        tracing::info!("Stopped container {}", id);
         Ok(())
     }
 
@@ -284,6 +257,51 @@ impl DockerManager {
             .await?;
         tracing::info!("Removed container {}", id);
         Ok(())
+    }
+
+    /// Remove all containers matching a name (both running and stopped)
+    /// This is useful to clean up old containers before recreating
+    pub async fn cleanup_containers_by_name(&self, name: &str) -> anyhow::Result<u32> {
+        let options = ListContainersOptions {
+            all: true,
+            filters: std::collections::HashMap::from([
+                ("name".to_string(), vec![name.to_string()]),
+            ]),
+            ..Default::default()
+        };
+
+        let containers = self.docker.list_containers(Some(options)).await?;
+        let mut removed = 0u32;
+
+        for container in containers {
+            if let Some(id) = container.id {
+                // Check if the name matches exactly (Docker filter is a prefix match)
+                let container_name = container.names
+                    .unwrap_or_default()
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+                    .trim_start_matches('/')
+                    .to_string();
+
+                if container_name == name {
+                    tracing::info!("Cleaning up old container: {} ({})", container_name, id);
+                    // Force stop and remove
+                    let _ = self.docker.stop_container(&id, Some(StopContainerOptions { t: 1 })).await;
+                    if let Err(e) = self.docker.remove_container(&id, Some(RemoveContainerOptions { force: true, ..Default::default() })).await {
+                        tracing::warn!("Failed to remove container {}: {}", id, e);
+                    } else {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+
+        if removed > 0 {
+            tracing::info!("Cleaned up {} old container(s) with name '{}'", removed, name);
+        }
+
+        Ok(removed)
     }
 
     pub async fn list_containers(&self) -> anyhow::Result<Vec<ContainerInfo>> {
