@@ -518,41 +518,23 @@ pub async fn start_container(
         // Update state with new docker_id
         update_container_docker_id(&state, &container.name, docker_id.clone());
 
-        // Check if we need to run install script (first time setup)
-        if !container.installed {
-            if let Some(ref script) = container.install_script {
-                tracing::info!("=== Running install script for {} (first start) ===", container.name);
-
-                // Run install in temp container - logs will appear in daemon output
-                // The user should see "Installing..." message in their console
-                match state.docker.run_install_in_temp_container(
-                    &container.name,
-                    &container.image,
-                    script,
-                    &container.environment,
-                ).await {
-                    Ok(_) => {
-                        tracing::info!("Install script completed successfully for {}", container.name);
-                        // Mark as installed
-                        mark_container_installed(&state, &container.name);
-                    }
-                    Err(e) => {
-                        tracing::error!("Install script failed for {}: {}", container.name, e);
-                        // Still mark as installed to prevent infinite retry loops
-                        // User can manually reinstall if needed
-                        mark_container_installed(&state, &container.name);
-                    }
-                }
-            } else {
-                // No install script, mark as installed
-                mark_container_installed(&state, &container.name);
-            }
-        }
-
         // Save state
         save_container_state(&state).await;
 
-        // Start the new container
+        // Check if container needs installation (first time setup)
+        // If so, we DON'T start the container here - the WebSocket handler will do installation
+        // and then start the container, streaming logs to the client
+        if !container.installed && container.install_script.is_some() {
+            tracing::info!("Container {} needs installation - will be triggered via WebSocket", container.name);
+            return Ok(Json(serde_json::json!({
+                "success": true,
+                "recreated": true,
+                "dockerId": docker_id,
+                "needsInstall": true
+            })));
+        }
+
+        // Start the container (no install needed)
         state.docker
             .start_container(&docker_id)
             .await
@@ -923,12 +905,39 @@ pub async fn ws_logs(
 async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, container_name: String) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Find docker_id - guards dropped immediately
-    let docker_id = {
-        state.containers.iter()
-            .find(|entry| entry.key() == &container_name || entry.value().docker_id.starts_with(&container_name))
-            .map(|entry| entry.value().docker_id.clone())
-            .unwrap_or_else(|| container_name.clone())
+    // Get container info - guards dropped immediately
+    let container_info = {
+        state.containers.get(&container_name)
+            .map(|entry| (
+                entry.value().docker_id.clone(),
+                entry.value().installed,
+                entry.value().install_script.clone(),
+                entry.value().image.clone(),
+                entry.value().environment.clone(),
+            ))
+    };
+
+    let (docker_id, installed, install_script, image, environment) = match container_info {
+        Some(info) => info,
+        None => {
+            // Try to find by docker_id prefix
+            let found = state.containers.iter()
+                .find(|entry| entry.value().docker_id.starts_with(&container_name))
+                .map(|entry| (
+                    entry.value().docker_id.clone(),
+                    entry.value().installed,
+                    entry.value().install_script.clone(),
+                    entry.value().image.clone(),
+                    entry.value().environment.clone(),
+                ));
+            match found {
+                Some(info) => info,
+                None => {
+                    let _ = sender.send(Message::Text("\x1b[31m● Container not found\x1b[0m".to_string())).await;
+                    return;
+                }
+            }
+        }
     };
 
     // Send initial connection message
@@ -938,7 +947,84 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
 
     let (tx, mut rx) = broadcast::channel::<String>(1000);
 
-    // Start streaming logs (handles both running and stopped containers)
+    // Check if installation is needed
+    if !installed {
+        if let Some(script) = install_script {
+            // Send install starting message
+            let _ = sender.send(Message::Text("\x1b[33m● Starting installation...\x1b[0m".to_string())).await;
+
+            let tx_for_install = tx.clone();
+            let container_name_clone = container_name.clone();
+            let state_clone = state.clone();
+
+            // Run installation with logs going to the broadcast channel
+            tracing::info!("Running install script for {} via WebSocket", container_name);
+
+            // Create the install future
+            let install_fut = state.docker.run_install_in_temp_container_with_logs(
+                &container_name,
+                &image,
+                &script,
+                &environment,
+                Some(tx_for_install),
+            );
+
+            // Pin the future for use in select
+            tokio::pin!(install_fut);
+
+            // Forward install logs to WebSocket while install is running
+            let install_result = loop {
+                tokio::select! {
+                    biased;
+
+                    result = &mut install_fut => {
+                        // Drain remaining logs
+                        while let Ok(log) = rx.try_recv() {
+                            let _ = sender.send(Message::Text(log)).await;
+                        }
+                        break result;
+                    }
+                    log_result = rx.recv() => {
+                        match log_result {
+                            Ok(log) => {
+                                if sender.send(Message::Text(log)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => continue,
+                        }
+                    }
+                }
+            };
+
+            match install_result {
+                Ok(_) => {
+                    tracing::info!("Install completed for {}", container_name);
+                    mark_container_installed(&state_clone, &container_name_clone);
+                    save_container_state(&state_clone).await;
+
+                    // Don't auto-start - let the user click Start
+                    let _ = sender.send(Message::Text("\x1b[32m● Installation complete! Click Start to launch the server.\x1b[0m".to_string())).await;
+
+                    // Keep connection open but don't start the container
+                    // The user will click Start which triggers the HTTP endpoint
+                }
+                Err(e) => {
+                    tracing::error!("Install failed for {}: {}", container_name, e);
+                    mark_container_installed(&state_clone, &container_name_clone);
+                    save_container_state(&state_clone).await;
+                    let _ = sender.send(Message::Text(format!("\x1b[31m● Installation failed: {}\x1b[0m", e))).await;
+                    return;
+                }
+            }
+        }
+    }
+
+    // Get the current docker_id after potential install
+    let docker_id = get_docker_id(&state, &container_name);
+
+    // Start streaming logs
     state.docker.stream_logs(&docker_id, tx);
 
 

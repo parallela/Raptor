@@ -393,34 +393,19 @@ impl DockerManager {
 
         // Wrap script to ensure curl and jq are available
         let full_script = format!(r#"
-            set -e
             echo "[Raptor Install] Starting installation..."
             echo "[Raptor Install] Working directory: $(pwd)"
-            echo "[Raptor Install] Checking for required tools..."
-
             cd /home/container
-
-            # Install curl and jq if not present
-            if command -v apk &> /dev/null; then
-                echo "[Raptor Install] Alpine detected, installing curl jq bash..."
-                apk add --no-cache curl jq bash 2>/dev/null || true
-            elif command -v apt-get &> /dev/null; then
-                echo "[Raptor Install] Debian/Ubuntu detected, installing curl jq..."
-                apt-get update -qq && apt-get install -y -qq curl jq 2>/dev/null || true
-            elif command -v yum &> /dev/null; then
-                echo "[Raptor Install] RHEL/CentOS detected, installing curl jq..."
-                yum install -y curl jq 2>/dev/null || true
-            fi
-
-            echo "[Raptor Install] Tool check: curl=$(which curl 2>/dev/null || echo 'not found'), jq=$(which jq 2>/dev/null || echo 'not found')"
             echo "[Raptor Install] Running install script..."
 
             # Run the actual install script
             {}
 
-            echo "[Raptor Install] Installation complete!"
+            INSTALL_EXIT=$?
+            echo "[Raptor Install] Install script finished with exit code: $INSTALL_EXIT"
             echo "[Raptor Install] Files in /home/container:"
-            ls -la /home/container/ 2>/dev/null || echo "(empty or error listing)"
+            ls -la /home/container/ 2>/dev/null || echo "(empty)"
+            exit $INSTALL_EXIT
         "#, script);
 
         let host_config = bollard::service::HostConfig {
@@ -461,8 +446,6 @@ impl DockerManager {
         self.docker.start_container::<String>(&create_result.id, None).await?;
         tracing::info!("Install container started: {}", create_result.id);
 
-        // Small delay to let the container initialize
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Check if container is still running
         match self.docker.inspect_container(&create_result.id, None).await {
@@ -543,8 +526,6 @@ impl DockerManager {
                 wait_result = wait_stream.next() => {
                     match wait_result {
                         Some(Ok(exit)) => {
-                            // Get any remaining logs after exit
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
                             if exit.status_code != 0 {
                                 tracing::error!("=== Install script FAILED with exit code {} ===", exit.status_code);
