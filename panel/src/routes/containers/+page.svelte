@@ -52,7 +52,7 @@
             [containers, daemons, flakes] = await Promise.all([
                 api.listContainers(),
                 api.listDaemons(),
-                api.request<Flake[]>('/flakes')
+                api.listFlakes()
             ]);
         } catch (e) {
             console.error(e);
@@ -70,14 +70,16 @@
             return;
         }
         try {
-            selectedFlake = await api.request<FlakeWithVariables>(`/flakes/${flakeId}`);
+            selectedFlake = await api.getFlake(flakeId);
             // Initialize variables with defaults
             flakeVariables = {};
-            for (const v of selectedFlake.variables) {
-                flakeVariables[v.envVariable] = v.defaultValue || '';
+            if (selectedFlake) {
+                for (const v of selectedFlake.variables) {
+                    flakeVariables[v.envVariable] = v.defaultValue || '';
+                }
+                // Set SERVER_MEMORY from memory limit
+                flakeVariables['SERVER_MEMORY'] = String(newContainer.memoryLimit);
             }
-            // Set SERVER_MEMORY from memory limit
-            flakeVariables['SERVER_MEMORY'] = String(newContainer.memoryLimit);
         } catch (e: any) {
             toast.error('Failed to load flake details');
         }
@@ -246,21 +248,33 @@
                 </div>
 
                 <form on:submit|preventDefault={createContainer} class="space-y-5">
-                    <!-- Image Presets -->
+                    <!-- Flake Selection -->
                     <div class="input-group">
-                        <label class="input-label">Server Type</label>
-                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {#each imagePresets as preset}
+                        <label class="input-label">Server Type (Flake)</label>
+                        {#if flakes.length > 0}
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {#each flakes as flake}
+                                    <button
+                                        type="button"
+                                        on:click={() => { newContainer.flakeId = flake.id; selectFlake(flake.id); }}
+                                        class="p-3 rounded-lg border text-left transition-all duration-200 {newContainer.flakeId === flake.id ? 'border-primary-500 bg-primary-500/10' : 'border-dark-700 bg-dark-800/50 hover:border-dark-600'}"
+                                    >
+                                        <p class="text-sm font-medium text-white">{flake.name}</p>
+                                        <p class="text-xs text-dark-400 mt-0.5 truncate">{flake.description || flake.dockerImage}</p>
+                                    </button>
+                                {/each}
                                 <button
                                     type="button"
-                                    on:click={() => selectPreset(preset)}
-                                    class="p-3 rounded-lg border text-left transition-all duration-200 {selectedPreset?.name === preset.name ? 'border-primary-500 bg-primary-500/10' : 'border-dark-700 bg-dark-800/50 hover:border-dark-600'}"
+                                    on:click={() => { newContainer.flakeId = ''; selectedFlake = null; flakeVariables = {}; }}
+                                    class="p-3 rounded-lg border text-left transition-all duration-200 {!newContainer.flakeId ? 'border-primary-500 bg-primary-500/10' : 'border-dark-700 bg-dark-800/50 hover:border-dark-600'}"
                                 >
-                                    <p class="text-sm font-medium text-white">{preset.name}</p>
-                                    <p class="text-xs text-dark-400 mt-0.5">{preset.description}</p>
+                                    <p class="text-sm font-medium text-white">Custom Image</p>
+                                    <p class="text-xs text-dark-400 mt-0.5">Use your own Docker image</p>
                                 </button>
-                            {/each}
-                        </div>
+                            </div>
+                        {:else}
+                            <p class="text-dark-400 text-sm">No flakes available. Create one in Admin → Flakes.</p>
+                        {/if}
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
@@ -288,7 +302,7 @@
                             id="image"
                             bind:value={newContainer.image}
                             class="input"
-                            placeholder="ghcr.io/pterodactyl/yolks:java_21"
+                            placeholder="artifacts.lstan.eu/java:21"
                             required
                             disabled={selectedPreset?.name !== 'Custom Image' && selectedPreset !== null}
                         />

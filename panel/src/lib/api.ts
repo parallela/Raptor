@@ -191,6 +191,14 @@ export const api = {
 
     // Admin: All containers
     listAllContainers: () => request<Container[]>('/admin/containers'),
+
+    // Flakes
+    listFlakes: () => request<import('./types').Flake[]>('/flakes'),
+    getFlake: (id: string) => request<import('./types').FlakeWithVariables>(`/flakes/${id}`),
+    createFlake: (data: any) => request<import('./types').FlakeWithVariables>('/flakes', { method: 'POST', body: JSON.stringify(data) }),
+    importFlake: (eggJson: any) => request<import('./types').FlakeWithVariables>('/flakes/import', { method: 'POST', body: JSON.stringify({ eggJson }) }),
+    deleteFlake: (id: string) => request<void>(`/flakes/${id}`, { method: 'DELETE' }),
+    exportFlake: (id: string) => request<any>(`/flakes/${id}/export`),
 };
 
 export function createWebSocket(containerId: string): WebSocket {
