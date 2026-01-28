@@ -655,7 +655,7 @@ pub async fn start_container(
 
     // Get all container allocations from DB
     let allocations: Vec<crate::models::ContainerAllocation> = sqlx::query_as(
-        r#"SELECT ca.id, ca.allocation_id, ca.ip, ca.port, ca.internal_port, ca.protocol, COALESCE(ca.is_primary, FALSE) as is_primary
+        r#"SELECT ca.id, ca.container_id, ca.allocation_id, ca.ip, ca.port, ca.internal_port, ca.protocol, COALESCE(ca.is_primary, FALSE) as is_primary, ca.created_at
            FROM container_allocations ca
            WHERE ca.container_id = $1
            ORDER BY ca.is_primary DESC, ca.ip, ca.port"#
@@ -664,7 +664,10 @@ pub async fn start_container(
         .fetch_all(&state.db)
         .await?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // First, update the daemon with current allocations
     if !allocations.is_empty() {

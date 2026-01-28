@@ -15,7 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
 use crate::docker::DockerManager;
-use crate::models::AppState;
+use crate::models::{AppState, ContainerLocks};
 use crate::ftp::FtpServerState;
 
 #[tokio::main]
@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         api_key: config.daemon_api_key.clone(),
         containers: containers_map,
         ftp_state: ftp_state.clone(),
+        container_locks: ContainerLocks::new(),
     });
 
     let cors = CorsLayer::new()

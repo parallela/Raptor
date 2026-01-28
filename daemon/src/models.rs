@@ -1,15 +1,53 @@
 use std::sync::Arc;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
 use crate::docker::DockerManager;
 use crate::ftp::FtpServerState;
+
+/// Per-container locking mechanism to prevent concurrent operations on the same container.
+/// This ensures that only one start/stop/restart/recreate operation can happen
+/// on a given container at a time, preventing race conditions and deadlocks.
+pub struct ContainerLocks {
+    locks: DashMap<String, Arc<Mutex<()>>>,
+}
+
+impl ContainerLocks {
+    pub fn new() -> Self {
+        Self {
+            locks: DashMap::new(),
+        }
+    }
+
+    /// Get or create a lock for a specific container.
+    /// The lock is cloned (Arc) so it can be held across await points safely.
+    pub fn get_lock(&self, container_id: &str) -> Arc<Mutex<()>> {
+        self.locks
+            .entry(container_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// Remove a lock when a container is deleted (optional cleanup)
+    pub fn remove_lock(&self, container_id: &str) {
+        self.locks.remove(container_id);
+    }
+}
+
+impl Default for ContainerLocks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub struct AppState {
     pub docker: DockerManager,
     pub api_key: String,
     pub containers: DashMap<String, ManagedContainer>,
     pub ftp_state: Arc<FtpServerState>,
+    /// Per-container locks to serialize container operations
+    pub container_locks: ContainerLocks,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
