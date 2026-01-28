@@ -260,23 +260,18 @@
     async function stopContainer() {
         actionLoading = 'stop';
         try {
-            // Close websockets first
-            if (ws) {
-                ws.onclose = null;
-                ws.close();
-                ws = null;
-            }
+            // Close stats WebSocket as it won't work during shutdown
             if (statsWs) {
                 statsWs.onclose = null;
                 statsWs.close();
                 statsWs = null;
             }
             // Use graceful stop with "stop" command for Minecraft servers
-            // The server has 10 seconds to stop gracefully before being force killed
-            await api.gracefulStop(containerId, 'stop', 10);
-            await loadContainer();
-            stats = null; // Clear stats when stopped
-            toast.success('Server stopped');
+            // The server has 30 seconds to stop gracefully before being force killed
+            await api.gracefulStop(containerId, 'stop', 30);
+            // Don't reload container immediately - let the logs show the shutdown
+            // The WebSocket onclose handler will update the status when container stops
+            toast.success('Stop command sent');
         } catch (e: any) {
             toast.error(e.message || 'Failed to stop server');
         } finally {
@@ -287,12 +282,6 @@
     async function restartContainer() {
         actionLoading = 'restart';
         try {
-            // Close existing connections before restart
-            if (ws) {
-                ws.onclose = null;
-                ws.close();
-                ws = null;
-            }
             if (statsWs) {
                 statsWs.onclose = null;
                 statsWs.close();
@@ -310,12 +299,9 @@
 
             await api.restartContainer(containerId);
 
-            // Wait a bit then reload container status and reconnect
-            setTimeout(async () => {
-                await loadContainer();
-                connectWebSocket();
-                setTimeout(() => connectStatsWebSocket(), 1000);
-            }, 2000);
+            // The WebSocket will disconnect when the container stops
+            // The onclose handler will try to reconnect automatically
+            // We just need to make sure it reconnects after the container restarts
 
             toast.success('Server restarting...');
         } catch (e: any) {
