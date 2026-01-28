@@ -265,6 +265,9 @@ pub async fn create_container(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Check if there's an install script - if so, mark as not installed
+    let has_install_script = req.install_script.is_some();
+
     let managed = ManagedContainer {
         name: req.name.clone(),
         docker_id: docker_id.clone(),
@@ -274,6 +277,9 @@ pub async fn create_container(
         allocation: req.allocation.clone(),
         allocations: req.allocations.clone(),
         resources: resources.clone(),
+        install_script: req.install_script.clone(),
+        installed: !has_install_script, // If no install script, consider it installed
+        environment: req.environment.clone(),
     };
 
     // Insert into state - guard dropped immediately
@@ -282,21 +288,10 @@ pub async fn create_container(
     // Save state asynchronously (no locks held)
     save_container_state(&state).await;
 
-    // Run install script if provided (from flake)
-    // We run this in a separate temporary container that shares the same volume
-    // This avoids issues with the main container's restart policy
-    if let Some(ref script) = req.install_script {
-        tracing::info!("Running install script for container {}", req.name);
-
-        match state.docker.run_install_in_temp_container(&req.name, &req.image, script, &req.environment).await {
-            Ok(_) => {
-                tracing::info!("Install script completed for container {}", req.name);
-            }
-            Err(e) => {
-                tracing::error!("Install script failed for container {}: {}", req.name, e);
-                // Don't fail - container is still created, user can retry install manually
-            }
-        }
+    // Note: Install script will run on first start, not here
+    // This allows the user to see installation progress in the console
+    if has_install_script {
+        tracing::info!("Container {} has install script - will run on first start", req.name);
     }
 
     Ok(Json(managed))
@@ -512,6 +507,37 @@ pub async fn start_container(
 
         // Update state with new docker_id
         update_container_docker_id(&state, &container.name, docker_id.clone());
+
+        // Check if we need to run install script (first time setup)
+        if !container.installed {
+            if let Some(ref script) = container.install_script {
+                tracing::info!("=== Running install script for {} (first start) ===", container.name);
+
+                // Run install in temp container - logs will appear in daemon output
+                // The user should see "Installing..." message in their console
+                match state.docker.run_install_in_temp_container(
+                    &container.name,
+                    &container.image,
+                    script,
+                    &container.environment,
+                ).await {
+                    Ok(_) => {
+                        tracing::info!("Install script completed successfully for {}", container.name);
+                        // Mark as installed
+                        mark_container_installed(&state, &container.name);
+                    }
+                    Err(e) => {
+                        tracing::error!("Install script failed for {}: {}", container.name, e);
+                        // Still mark as installed to prevent infinite retry loops
+                        // User can manually reinstall if needed
+                        mark_container_installed(&state, &container.name);
+                    }
+                }
+            } else {
+                // No install script, mark as installed
+                mark_container_installed(&state, &container.name);
+            }
+        }
 
         // Save state
         save_container_state(&state).await;
