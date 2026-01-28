@@ -408,8 +408,7 @@ impl DockerManager {
                 }
             }
 
-            tracing::info!("Sent {} historical log lines for container {}", log_count, id);
-            let _ = tx.send(format!("\x1b[33m--- {} historical log lines loaded ---\x1b[0m", log_count));
+            tracing::debug!("Loaded {} historical log lines for container {}", log_count, id);
 
             // Now follow new logs (stream in real-time)
             let follow_options = LogsOptions::<String> {
