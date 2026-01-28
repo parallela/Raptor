@@ -31,7 +31,7 @@
         loading = true;
         try {
             [allocations, daemons] = await Promise.all([
-                api.listAllocations(),
+                api.listAllAllocations(),
                 api.listDaemons(),
             ]);
         } catch (e) {

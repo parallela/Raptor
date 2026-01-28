@@ -122,8 +122,8 @@
     async function importFlake() {
         importing = true;
         try {
-            const eggJson = JSON.parse(importJson);
-            await api.importFlake(eggJson);
+            const flakeJson = JSON.parse(importJson);
+            await api.importFlake(flakeJson);
             toast.success('Flake imported successfully');
             showImportModal = false;
             importJson = '';
@@ -148,8 +148,8 @@
 
     async function exportFlake(id: string) {
         try {
-            const egg = await api.exportFlake(id);
-            const blob = new Blob([JSON.stringify(egg, null, 2)], { type: 'application/json' });
+            const flake = await api.exportFlake(id);
+            const blob = new Blob([JSON.stringify(flake, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -205,7 +205,7 @@
         </div>
         <div class="flex gap-2">
             <button on:click={() => showImportModal = true} class="btn-secondary">
-                Import Egg
+                Import Flake
             </button>
             <button on:click={() => showCreateModal = true} class="btn-primary">
                 Create Flake
@@ -219,7 +219,7 @@
         </div>
     {:else if flakes.length === 0}
         <div class="bg-dark-800 rounded-lg p-12 text-center">
-            <p class="text-dark-400">No flakes yet. Create one or import a Pterodactyl egg.</p>
+            <p class="text-dark-400">No flakes yet. Create one or import a flake.</p>
         </div>
     {:else}
         <div class="grid gap-4">
@@ -345,19 +345,18 @@
     <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div class="bg-dark-800 rounded-lg w-full max-w-2xl">
             <div class="p-4 border-b border-dark-700">
-                <h2 class="text-lg font-semibold text-white">Import Pterodactyl Egg</h2>
+                <h2 class="text-lg font-semibold text-white">Import Flake</h2>
             </div>
             <form on:submit|preventDefault={importFlake} class="p-4">
                 <p class="text-dark-400 text-sm mb-4">
-                    Paste the JSON content of a Pterodactyl egg to import it as a Flake.
-                    The Docker image will be replaced with our artifact image.
+                    Paste the JSON content of a Flake (or Pterodactyl egg) to import it.
                 </p>
                 <textarea
                     bind:value={importJson}
                     required
                     class="input w-full font-mono text-sm"
                     rows="12"
-                    placeholder="Paste Pterodactyl egg JSON here..."
+                    placeholder="Paste Flake JSON here..."
                 ></textarea>
                 <div class="flex justify-end gap-2 mt-4">
                     <button type="button" on:click={() => { showImportModal = false; importJson = ''; }} class="btn-secondary">Cancel</button>
@@ -458,7 +457,7 @@
         @apply bg-primary-600 text-white hover:bg-primary-500;
     }
     .btn-danger {
-        @apply bg-red-600/20 text-red-500 hover:bg-red-600/30;
+        @apply bg-red-600 text-white hover:bg-red-500;
     }
     .input {
         @apply bg-dark-700 border border-dark-600 rounded px-3 py-2 text-white focus:outline-none focus:border-primary-500;

@@ -113,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
             .route_layer(axum_middleware::from_fn(require_permission("containers.view_all"))))
         .route("/daemons/:id/ip-pools", get(handlers::allocations::list_daemon_ip_pools))
         .route("/allocations", get(handlers::allocations::list_allocations))
+        .route("/allocations/all", get(handlers::allocations::list_all_allocations))
         .route("/allocations", post(handlers::allocations::create_allocation)
             .route_layer(axum_middleware::from_fn(require_permission("allocations.create"))))
         .route("/ip-pools", get(handlers::allocations::list_ip_pools))

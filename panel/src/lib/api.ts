@@ -55,7 +55,8 @@ export interface CreateContainerData {
     startupScript?: string;
     allocationId?: string;
     // Resource limits
-    memoryLimit?: number;
+    memoryLimit?: number;      // Docker container memory limit
+    serverMemory?: number;     // Server/JVM heap memory (-Xmx)
     cpuLimit?: number;
     diskLimit?: number;
     swapLimit?: number;
@@ -148,6 +149,7 @@ export const api = {
 
     // Allocations
     listAllocations: () => request<Allocation[]>('/allocations'),
+    listAllAllocations: () => request<Allocation[]>('/allocations/all'),
     createAllocation: (data: { daemonId: string; ip: string; port: number }) =>
         request<Allocation>('/allocations', { method: 'POST', body: JSON.stringify(data) }),
     deleteAllocation: (id: string) => request<void>(`/allocations/${id}`, { method: 'DELETE' }),

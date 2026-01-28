@@ -8,6 +8,17 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::models::{Allocation, AppState, CreateAllocationRequest, CreateIpPoolRequest, IpPool};
 
+/// List all allocations (for admin page) - includes both assigned and unassigned
+pub async fn list_all_allocations(State(state): State<AppState>) -> AppResult<Json<Vec<Allocation>>> {
+    let allocations: Vec<Allocation> = sqlx::query_as(
+        r#"SELECT * FROM allocations ORDER BY created_at DESC"#
+    )
+        .fetch_all(&state.db)
+        .await?;
+    Ok(Json(allocations))
+}
+
+/// List only available (unassigned) allocations - for container creation dropdowns
 pub async fn list_allocations(State(state): State<AppState>) -> AppResult<Json<Vec<Allocation>>> {
     // Only return allocations that are NOT already assigned to a container
     let allocations: Vec<Allocation> = sqlx::query_as(

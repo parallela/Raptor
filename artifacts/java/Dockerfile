@@ -1,8 +1,11 @@
 # Raptor Game Server - Java Runtime
 # Base image for running Java-based game servers (Minecraft, etc.)
 # Registry: artifacts.lstan.eu/java:21
+#
+# Build for multiple platforms:
+# docker buildx build --platform linux/amd64,linux/arm64 -t artifacts.lstan.eu/java:21 --push .
 
-FROM --platform=linux/amd64 eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre
 
 LABEL maintainer="Raptor Panel"
 LABEL org.opencontainers.image.source="https://github.com/raptor-panel/raptor"

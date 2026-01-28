@@ -186,6 +186,8 @@ pub async fn create_container(
 
     // Build allocations array for daemon
     let mut allocations_for_daemon: Vec<serde_json::Value> = Vec::new();
+    let mut primary_port: Option<i32> = None;
+    let mut primary_ip: Option<String> = None;
 
     // Add primary allocation if provided
     if let Some(allocation_id) = req.allocation_id {
@@ -197,6 +199,9 @@ pub async fn create_container(
             .fetch_optional(&state.db)
             .await?
             .ok_or(AppError::BadRequest("Primary allocation not found or belongs to different daemon".into()))?;
+
+        primary_port = Some(allocation.port);
+        primary_ip = Some(allocation.ip.clone());
 
         allocations_for_daemon.push(serde_json::json!({
             "id": Uuid::new_v4().to_string(),
@@ -229,6 +234,14 @@ pub async fn create_container(
             "protocol": "tcp",
             "isPrimary": false
         }));
+    }
+
+    // Add SERVER_PORT and SERVER_IP to flake_variables from primary allocation
+    if let Some(port) = primary_port {
+        flake_variables.insert("SERVER_PORT".to_string(), port.to_string());
+    }
+    if let Some(ip) = primary_ip {
+        flake_variables.insert("SERVER_IP".to_string(), ip);
     }
 
     // Use container UUID as the Docker container name

@@ -228,29 +228,61 @@ pub async fn import_flake(
     let egg = &req.egg_json;
 
     let name = egg["name"].as_str().unwrap_or("Imported").to_string();
-    let slug = name.to_lowercase().replace(' ', "-");
+    let base_slug = egg["slug"].as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| name.to_lowercase().replace(' ', "-").replace("(", "").replace(")", ""));
+
+    // Check if slug exists and generate a unique one if needed
+    let mut slug = base_slug.clone();
+    let mut counter = 1;
+    loop {
+        let existing: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM flakes WHERE slug = $1")
+            .bind(&slug)
+            .fetch_optional(&state.db)
+            .await?;
+        if existing.is_none() {
+            break;
+        }
+        slug = format!("{}_{}", base_slug, counter);
+        counter += 1;
+    }
+
     let author = egg["author"].as_str().map(|s| s.to_string());
     let description = egg["description"].as_str().map(|s| s.to_string());
-    let startup_command = egg["startup"].as_str().unwrap_or("").to_string();
-    let docker_image = "artifacts.lstan.eu/java:21".to_string();
+    let startup_command = egg["startup"].as_str()
+        .or_else(|| egg["startupCommand"].as_str())
+        .unwrap_or("").to_string();
+
+    // Use provided dockerImage or default to our artifact
+    let docker_image = egg["dockerImage"].as_str()
+        .or_else(|| egg["docker_image"].as_str())
+        .unwrap_or("artifacts.lstan.eu/java:21").to_string();
 
     let mut config_files = serde_json::json!({});
     if let Some(config) = egg["config"]["files"].as_str() {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(config) {
             config_files = parsed;
         }
+    } else if let Some(config) = egg["configFiles"].as_object() {
+        config_files = serde_json::json!(config);
     }
 
     let startup_detection = egg["config"]["startup"].as_str()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v["done"].as_str().map(|s| s.to_string()));
+        .and_then(|v| v["done"].as_str().map(|s| s.to_string()))
+        .or_else(|| egg["startupDetection"].as_str().map(|s| s.to_string()));
 
-    let mut install_script = egg["scripts"]["installation"]["script"].as_str().map(|s| s.to_string());
+    let mut install_script = egg["scripts"]["installation"]["script"].as_str()
+        .or_else(|| egg["installScript"].as_str())
+        .map(|s| s.to_string());
     if let Some(ref mut script) = install_script {
         if !script.contains("eula=true") {
             script.push_str("\necho 'eula=true' > eula.txt\n");
         }
     }
+
+    // Use a transaction to ensure atomicity
+    let mut tx = state.db.begin().await?;
 
     let flake_id = Uuid::new_v4();
 
@@ -269,12 +301,26 @@ pub async fn import_flake(
         .bind(&config_files)
         .bind(&startup_detection)
         .bind(&install_script)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
 
     let mut variables = Vec::new();
-    if let Some(vars) = egg["variables"].as_array() {
+    let vars_array = egg["variables"].as_array();
+    if let Some(vars) = vars_array {
+        // Track env variables to avoid duplicates within the same import
+        let mut seen_env_vars = std::collections::HashSet::new();
+
         for (idx, var) in vars.iter().enumerate() {
+            let env_var = var["env_variable"].as_str()
+                .or_else(|| var["envVariable"].as_str())
+                .unwrap_or("VAR").to_string();
+
+            // Skip duplicate env variables
+            if seen_env_vars.contains(&env_var) {
+                continue;
+            }
+            seen_env_vars.insert(env_var.clone());
+
             let v: FlakeVariable = sqlx::query_as(
                 r#"INSERT INTO flake_variables (id, flake_id, name, description, env_variable, default_value, rules, user_viewable, user_editable, sort_order)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -284,17 +330,20 @@ pub async fn import_flake(
                 .bind(flake_id)
                 .bind(var["name"].as_str().unwrap_or("Variable"))
                 .bind(var["description"].as_str())
-                .bind(var["env_variable"].as_str().unwrap_or("VAR"))
-                .bind(var["default_value"].as_str().unwrap_or(""))
+                .bind(&env_var)
+                .bind(var["default_value"].as_str().or_else(|| var["defaultValue"].as_str()).unwrap_or(""))
                 .bind(var["rules"].as_str().unwrap_or("nullable|string"))
-                .bind(var["user_viewable"].as_bool().unwrap_or(true))
-                .bind(var["user_editable"].as_bool().unwrap_or(true))
+                .bind(var["user_viewable"].as_bool().or_else(|| var["userViewable"].as_bool()).unwrap_or(true))
+                .bind(var["user_editable"].as_bool().or_else(|| var["userEditable"].as_bool()).unwrap_or(true))
                 .bind(idx as i32)
-                .fetch_one(&state.db)
+                .fetch_one(&mut *tx)
                 .await?;
             variables.push(v);
         }
     }
+
+    // Commit the transaction
+    tx.commit().await?;
 
     Ok(Json(FlakeWithVariables { flake, variables }))
 }

@@ -1,9 +1,9 @@
 {
-  "name": "Paper",
-  "slug": "paper",
+  "name": "Paper (Yolks)",
+  "slug": "paper_yolks_test",
   "author": "Raptor Panel",
-  "description": "High performance Spigot fork that aims to fix gameplay and mechanics inconsistencies.",
-  "dockerImage": "artifacts.lstan.eu/java:21",
+  "description": "High performance Spigot fork using Pterodactyl Yolks Java image for testing.",
+  "dockerImage": "ghcr.io/pterodactyl/yolks:java_21",
   "startupCommand": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}",
   "configFiles": {
     "server.properties": {

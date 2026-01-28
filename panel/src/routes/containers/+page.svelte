@@ -91,10 +91,17 @@
     async function createContainer() {
         creating = true;
         try {
+            // Validate required fields
+            if (!newContainer.allocationId) {
+                toast.error('Please select a network allocation');
+                creating = false;
+                return;
+            }
+
             const payload: Record<string, unknown> = {
                 daemonId: newContainer.daemonId,
                 name: newContainer.name,
-                allocationId: newContainer.allocationId || undefined,
+                allocationId: newContainer.allocationId,
                 memoryLimit: newContainer.memoryLimit,
                 serverMemory: newContainer.serverMemory,
                 cpuLimit: newContainer.cpuLimit,
@@ -390,17 +397,18 @@
                     <div class="input-group">
                         <label for="allocation" class="input-label">
                             Network Allocation
-                            <span class="text-dark-500 font-normal">(optional)</span>
+                            <span class="text-red-400 font-normal">*</span>
                         </label>
                         <Select
                             id="allocation"
                             bind:value={newContainer.allocationId}
-                            placeholder="Auto-assign"
-                            options={[
-                                { value: '', label: 'Auto-assign' },
-                                ...availableAllocations.map(a => ({ value: a.id, label: `${a.ip}:${a.port}` }))
-                            ]}
+                            placeholder="Select an allocation..."
+                            options={availableAllocations.map(a => ({ value: a.id, label: `${a.ip}:${a.port}` }))}
+                            required
                         />
+                        {#if availableAllocations.length === 0}
+                            <p class="text-xs text-amber-400 mt-1">No allocations available. Please create one first in Admin → Allocations.</p>
+                        {/if}
                     </div>
 
                     <!-- User Assignment (Admin only) -->

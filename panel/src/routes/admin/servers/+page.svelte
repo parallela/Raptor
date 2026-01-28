@@ -80,12 +80,20 @@
         error = '';
         creating = true;
         try {
+            // Validate required allocation
+            if (!newServer.allocationId) {
+                error = 'Please select a network allocation';
+                toast.error(error);
+                creating = false;
+                return;
+            }
+
             await api.createContainer({
                 name: newServer.name,
                 daemonId: newServer.daemonId,
                 image: newServer.image,
                 startupScript: newServer.startupScript || undefined,
-                allocationId: newServer.allocationId || undefined,
+                allocationId: newServer.allocationId,
                 userId: newServer.userId || undefined,
                 memoryLimit: newServer.memoryLimit,
                 serverMemory: newServer.serverMemory,
@@ -198,18 +206,19 @@
                     <div class="input-group">
                         <label for="allocation" class="input-label">
                             Network Allocation
-                            <span class="text-dark-500 font-normal">(optional)</span>
+                            <span class="text-red-400 font-normal">*</span>
                         </label>
                         <Select
                             id="allocation"
                             bind:value={newServer.allocationId}
-                            placeholder="Auto-assign"
-                            options={[
-                                { value: '', label: 'Auto-assign' },
-                                ...availableAllocations.map(a => ({ value: a.id, label: `${a.ip}:${a.port}` }))
-                            ]}
+                            placeholder="Select an allocation..."
+                            options={availableAllocations.map(a => ({ value: a.id, label: `${a.ip}:${a.port}` }))}
                             disabled={!newServer.daemonId}
+                            required
                         />
+                        {#if newServer.daemonId && availableAllocations.length === 0}
+                            <p class="text-xs text-amber-400 mt-1">No allocations available for this daemon.</p>
+                        {/if}
                     </div>
 
                     {#if users.length > 0}
@@ -256,16 +265,16 @@
                 </h2>
 
                 <div class="grid gap-6 md:grid-cols-2">
-                    <!-- Memory -->
+                    <!-- Server Memory (JVM Heap) -->
                     <div class="input-group">
-                        <label for="memory" class="input-label flex items-center justify-between">
-                            <span>Memory (RAM)</span>
-                            <span class="text-primary-400 font-mono">{newServer.memoryLimit} MB</span>
+                        <label for="serverMemory" class="input-label flex items-center justify-between">
+                            <span>Server Memory</span>
+                            <span class="text-primary-400 font-mono">{newServer.serverMemory} MB</span>
                         </label>
                         <input
                             type="range"
-                            id="memory"
-                            bind:value={newServer.memoryLimit}
+                            id="serverMemory"
+                            bind:value={newServer.serverMemory}
                             min="128"
                             max="16384"
                             step="128"
@@ -273,7 +282,28 @@
                         />
                         <div class="flex justify-between text-xs text-dark-500 mt-1">
                             <span>128 MB</span>
-                            <span>16 GB</span>
+                            <span>JVM heap (-Xmx)</span>
+                        </div>
+                    </div>
+
+                    <!-- Container Memory (Docker limit) -->
+                    <div class="input-group">
+                        <label for="memory" class="input-label flex items-center justify-between">
+                            <span>Container Memory</span>
+                            <span class="text-primary-400 font-mono">{newServer.memoryLimit} MB</span>
+                        </label>
+                        <input
+                            type="range"
+                            id="memory"
+                            bind:value={newServer.memoryLimit}
+                            min="128"
+                            max="20480"
+                            step="128"
+                            class="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                        />
+                        <div class="flex justify-between text-xs text-dark-500 mt-1">
+                            <span>128 MB</span>
+                            <span>Docker limit (~20% higher)</span>
                         </div>
                     </div>
 
@@ -344,10 +374,14 @@
                 <!-- Resource Summary -->
                 <div class="mt-6 p-4 rounded-lg bg-dark-800/50 border border-dark-700/50">
                     <h3 class="text-sm font-medium text-dark-300 mb-3">Resource Summary</h3>
-                    <div class="grid grid-cols-4 gap-4">
+                    <div class="grid grid-cols-5 gap-4">
+                        <div class="text-center">
+                            <p class="text-2xl font-bold text-white">{newServer.serverMemory}</p>
+                            <p class="text-xs text-dark-400">MB Server</p>
+                        </div>
                         <div class="text-center">
                             <p class="text-2xl font-bold text-white">{newServer.memoryLimit}</p>
-                            <p class="text-xs text-dark-400">MB RAM</p>
+                            <p class="text-xs text-dark-400">MB Container</p>
                         </div>
                         <div class="text-center">
                             <p class="text-2xl font-bold text-white">{newServer.cpuLimit}</p>
