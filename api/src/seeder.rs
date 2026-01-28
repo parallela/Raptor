@@ -71,6 +71,10 @@ async fn seed_permissions(pool: &PgPool) -> anyhow::Result<()> {
         ("allocations.view", "View allocations"),
         ("allocations.create", "Create allocations"),
         ("allocations.delete", "Delete allocations"),
+        ("flakes.view", "View flakes (server templates)"),
+        ("flakes.create", "Create flakes"),
+        ("flakes.update", "Update flakes"),
+        ("flakes.delete", "Delete flakes"),
     ];
 
     for (name, description) in permissions {
@@ -110,6 +114,7 @@ async fn seed_role_permissions(pool: &PgPool) -> anyhow::Result<()> {
         "daemons.view", "containers.view_all", "containers.create",
         "containers.update", "containers.delete", "containers.manage",
         "allocations.view", "allocations.create",
+        "flakes.view", "flakes.create", "flakes.update", "flakes.delete",
     ];
     let user_perms = vec!["containers.view_own", "containers.manage_own"];
 

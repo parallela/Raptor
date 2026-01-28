@@ -22,12 +22,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     tzdata \
     locales \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up locale
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
+
+# Ensure Java is in PATH for all users/scripts
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Create container user and directories
 RUN useradd -m -d /home/container -s /bin/bash container

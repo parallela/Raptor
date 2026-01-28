@@ -79,6 +79,8 @@
                 }
                 // Set SERVER_MEMORY from memory limit
                 flakeVariables['SERVER_MEMORY'] = String(newContainer.memoryLimit);
+                // Pre-fill startup command from flake
+                newContainer.startupScript = selectedFlake.startupCommand;
             }
         } catch (e: any) {
             toast.error('Failed to load flake details');
@@ -95,7 +97,8 @@
                 memoryLimit: newContainer.memoryLimit,
                 cpuLimit: newContainer.cpuLimit,
                 diskLimit: newContainer.diskLimit,
-                userId: newContainer.userId || undefined
+                userId: newContainer.userId || undefined,
+                startupScript: newContainer.startupScript || undefined
             };
 
             // If flake selected, use flake_id and variables
@@ -105,7 +108,6 @@
             } else {
                 // Manual mode - require image
                 payload.image = newContainer.image;
-                payload.startupScript = newContainer.startupScript || undefined;
             }
 
             await api.createContainer(payload as any);
@@ -295,17 +297,69 @@
                         </div>
                     </div>
 
+                    <!-- Docker Image (only when no flake selected) -->
+                    {#if !newContainer.flakeId}
+                        <div class="input-group">
+                            <label for="image" class="input-label">Docker Image</label>
+                            <input
+                                type="text"
+                                id="image"
+                                bind:value={newContainer.image}
+                                class="input"
+                                placeholder="artifacts.lstan.eu/java:21"
+                                required
+                            />
+                        </div>
+                    {/if}
+
+                    <!-- Flake Variables (when flake selected) -->
+                    {#if selectedFlake && selectedFlake.variables.length > 0}
+                        <div class="input-group">
+                            <label class="input-label">Server Variables</label>
+                            <div class="space-y-3 bg-dark-800/50 p-3 rounded-lg border border-dark-700">
+                                {#each selectedFlake.variables.filter(v => v.userViewable) as variable}
+                                    <div>
+                                        <label for="var-{variable.envVariable}" class="text-sm text-dark-300 flex items-center gap-2">
+                                            {variable.name}
+                                            <code class="text-xs text-primary-400">{variable.envVariable}</code>
+                                        </label>
+                                        {#if variable.description}
+                                            <p class="text-xs text-dark-500 mb-1">{variable.description}</p>
+                                        {/if}
+                                        <input
+                                            type="text"
+                                            id="var-{variable.envVariable}"
+                                            bind:value={flakeVariables[variable.envVariable]}
+                                            class="input w-full"
+                                            placeholder={variable.defaultValue || ''}
+                                            disabled={!variable.userEditable}
+                                        />
+                                    </div>
+                                {/each}
+                            </div>
+                        </div>
+                    {/if}
+
+                    <!-- Startup Command -->
                     <div class="input-group">
-                        <label for="image" class="input-label">Docker Image</label>
-                        <input
-                            type="text"
-                            id="image"
-                            bind:value={newContainer.image}
-                            class="input"
-                            placeholder="artifacts.lstan.eu/java:21"
-                            required
-                            disabled={selectedPreset?.name !== 'Custom Image' && selectedPreset !== null}
-                        />
+                        <label for="startup" class="input-label">
+                            Startup Command
+                            {#if selectedFlake}
+                                <span class="text-dark-500 font-normal">(from flake, editable)</span>
+                            {:else}
+                                <span class="text-dark-500 font-normal">(optional)</span>
+                            {/if}
+                        </label>
+                        <textarea
+                            id="startup"
+                            bind:value={newContainer.startupScript}
+                            class="input min-h-[80px] resize-none font-mono text-sm"
+                            placeholder={selectedFlake ? selectedFlake.startupCommand : "java -Xms128M -Xmx1024M -jar server.jar nogui"}
+                            rows="2"
+                        ></textarea>
+                        {#if selectedFlake}
+                            <p class="text-xs text-dark-500 mt-1">Variables like {"{{SERVER_MEMORY}}"} will be replaced with their values</p>
+                        {/if}
                     </div>
 
                     <!-- Resource Limits -->
@@ -324,13 +378,6 @@
                         </div>
                     </div>
 
-                    <div class="input-group">
-                        <label for="startup" class="input-label">
-                            Startup Command
-                            <span class="text-dark-500 font-normal">(optional)</span>
-                        </label>
-                        <textarea id="startup" bind:value={newContainer.startupScript} class="input min-h-[80px] resize-none font-mono text-sm" placeholder="java -Xms128M -Xmx1024M -jar server.jar nogui" rows="2"></textarea>
-                    </div>
 
                     <div class="input-group">
                         <label for="allocation" class="input-label">

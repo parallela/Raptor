@@ -49,7 +49,9 @@ async function requestText(path: string): Promise<string> {
 export interface CreateContainerData {
     daemonId: string;
     name: string;
-    image: string;
+    // Either flakeId or image is required
+    flakeId?: string;
+    image?: string;
     startupScript?: string;
     allocationId?: string;
     // Resource limits
@@ -60,6 +62,8 @@ export interface CreateContainerData {
     ioWeight?: number;
     // Optional user assignment (admin only)
     userId?: string;
+    // Flake variables (envVariable -> value)
+    variables?: Record<string, string>;
 }
 
 export const api = {

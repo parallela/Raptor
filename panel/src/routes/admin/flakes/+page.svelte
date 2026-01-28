@@ -61,7 +61,7 @@
         variables: [] as { name: string; envVariable: string; defaultValue: string; description: string; rules: string; userViewable: boolean; userEditable: boolean }[]
     };
 
-    $: isAdmin = $user?.role === 'admin';
+    $: isAdmin = $user?.roleName === 'admin';
 
     onMount(async () => {
         if (!$user) {

@@ -233,11 +233,54 @@ impl DockerManager {
         tracing::info!("Running install script in container {}", id);
 
         // Build environment variables array
-        let env_vars: Vec<String> = env.iter()
+        let mut env_vars: Vec<String> = env.iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
 
-        // Create exec instance to run bash with the script
+        // Add PATH to ensure common tools are available
+        env_vars.push("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string());
+
+        // First, ensure the working directory exists and install required tools
+        let setup_script = r#"
+            mkdir -p /home/container
+            cd /home/container
+            # Install curl and jq if not present (for Alpine-based images)
+            if command -v apk &> /dev/null; then
+                apk add --no-cache curl jq bash 2>/dev/null || true
+            fi
+            # For Debian/Ubuntu based images
+            if command -v apt-get &> /dev/null; then
+                apt-get update -qq && apt-get install -y -qq curl jq 2>/dev/null || true
+            fi
+        "#;
+
+        // Run setup first
+        let setup_exec = self.docker.create_exec(
+            id,
+            CreateExecOptions {
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                cmd: Some(vec!["sh", "-c", setup_script]),
+                env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
+                working_dir: Some("/"),
+                user: Some("root"),
+                ..Default::default()
+            }
+        ).await?;
+
+        let setup_result = self.docker.start_exec(&setup_exec.id, None).await?;
+        if let StartExecResults::Attached { mut output, .. } = setup_result {
+            while let Some(msg) = output.next().await {
+                if let Ok(m) = msg {
+                    let text = m.to_string();
+                    if !text.trim().is_empty() {
+                        tracing::debug!("[setup] {}", text.trim());
+                    }
+                }
+            }
+        }
+
+        // Now run the actual install script
         let exec = self.docker.create_exec(
             id,
             CreateExecOptions {
@@ -246,7 +289,7 @@ impl DockerManager {
                 cmd: Some(vec!["bash", "-c", script]),
                 env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
                 working_dir: Some("/home/container"),
-                user: Some("container"),
+                user: Some("root"),
                 ..Default::default()
             }
         ).await?;
@@ -279,6 +322,187 @@ impl DockerManager {
                 tracing::info!("Install script completed successfully");
             }
         }
+
+        Ok(())
+    }
+
+    /// Run install script in a temporary container that shares the same volume as the target container
+    /// This avoids issues with the main container's restart policy
+    pub async fn run_install_in_temp_container(
+        &self,
+        container_name: &str,
+        image: &str,
+        script: &str,
+        env: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        use bollard::container::{CreateContainerOptions, Config, LogsOptions, RemoveContainerOptions, WaitContainerOptions};
+        use futures_util::StreamExt;
+
+        let install_container_name = format!("{}-install", container_name);
+        tracing::info!("=== Starting installation for container {} ===", container_name);
+        tracing::info!("Install container name: {}", install_container_name);
+        tracing::info!("Using image: {}", image);
+
+        // Build environment variables
+        let env_vars: Vec<String> = env.iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .chain(std::iter::once("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()))
+            .collect();
+
+        // Log environment variables
+        tracing::info!("Environment variables:");
+        for (k, v) in env.iter() {
+            tracing::info!("  {}={}", k, v);
+        }
+
+        // Get volume path (same as main container)
+        let base_path = std::env::var("FTP_BASE_PATH")
+            .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
+                .unwrap_or_else(|_| "/data/raptor".into()));
+        let volume_path = format!("{}/volumes/{}", base_path, container_name);
+        tracing::info!("Volume path: {}", volume_path);
+
+        // Create volume directory if it doesn't exist
+        if let Err(e) = tokio::fs::create_dir_all(&volume_path).await {
+            tracing::warn!("Failed to create volume directory {}: {}", volume_path, e);
+        }
+
+        let binds = vec![format!("{}:/home/container:rw", volume_path)];
+
+        // Log the install script (first 500 chars for brevity)
+        let script_preview = if script.len() > 500 {
+            format!("{}...(truncated)", &script[..500])
+        } else {
+            script.to_string()
+        };
+        tracing::info!("Install script:\n{}", script_preview);
+
+        // Wrap script to ensure curl and jq are available
+        let full_script = format!(r#"
+            set -e
+            echo "[Raptor Install] Starting installation..."
+            echo "[Raptor Install] Working directory: $(pwd)"
+            echo "[Raptor Install] Checking for required tools..."
+
+            cd /home/container
+
+            # Install curl and jq if not present
+            if command -v apk &> /dev/null; then
+                echo "[Raptor Install] Alpine detected, installing curl jq bash..."
+                apk add --no-cache curl jq bash 2>/dev/null || true
+            elif command -v apt-get &> /dev/null; then
+                echo "[Raptor Install] Debian/Ubuntu detected, installing curl jq..."
+                apt-get update -qq && apt-get install -y -qq curl jq 2>/dev/null || true
+            elif command -v yum &> /dev/null; then
+                echo "[Raptor Install] RHEL/CentOS detected, installing curl jq..."
+                yum install -y curl jq 2>/dev/null || true
+            fi
+
+            echo "[Raptor Install] Tool check: curl=$(which curl 2>/dev/null || echo 'not found'), jq=$(which jq 2>/dev/null || echo 'not found')"
+            echo "[Raptor Install] Running install script..."
+
+            # Run the actual install script
+            {}
+
+            echo "[Raptor Install] Installation complete!"
+            echo "[Raptor Install] Files in /home/container:"
+            ls -la /home/container/ 2>/dev/null || echo "(empty or error listing)"
+        "#, script);
+
+        let host_config = bollard::service::HostConfig {
+            binds: Some(binds),
+            auto_remove: Some(true), // Automatically remove container when it exits
+            ..Default::default()
+        };
+
+        let config = Config {
+            image: Some(image),
+            cmd: Some(vec!["bash", "-c", &full_script]),
+            host_config: Some(host_config),
+            working_dir: Some("/home/container"),
+            env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
+            tty: Some(false),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            ..Default::default()
+        };
+
+        // Remove any existing install container with the same name
+        let _ = self.docker.remove_container(
+            &install_container_name,
+            Some(RemoveContainerOptions { force: true, ..Default::default() })
+        ).await;
+
+        // Create the temporary install container
+        let create_result = self.docker.create_container(
+            Some(CreateContainerOptions { name: install_container_name.as_str(), platform: None }),
+            config
+        ).await?;
+
+        tracing::info!("Created install container: {}", create_result.id);
+
+        // Start the container
+        self.docker.start_container::<String>(&create_result.id, None).await?;
+        tracing::info!("Install container started, streaming logs...");
+
+        // Stream logs while waiting
+        let log_options = LogsOptions::<String> {
+            follow: true,
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        };
+
+        let mut logs = self.docker.logs(&create_result.id, Some(log_options));
+
+        // Also wait for container to finish
+        let wait_options = WaitContainerOptions { condition: "not-running" };
+        let mut wait_stream = self.docker.wait_container(&create_result.id, Some(wait_options));
+
+        // Process logs until container exits
+        loop {
+            tokio::select! {
+                log_msg = logs.next() => {
+                    match log_msg {
+                        Some(Ok(msg)) => {
+                            let text = msg.to_string();
+                            for line in text.lines() {
+                                if !line.trim().is_empty() {
+                                    tracing::info!("[install] {}", line.trim());
+                                }
+                            }
+                        }
+                        Some(Err(e)) => {
+                            tracing::warn!("[install] Log stream error: {}", e);
+                        }
+                        None => break, // Log stream ended
+                    }
+                }
+                wait_result = wait_stream.next() => {
+                    match wait_result {
+                        Some(Ok(exit)) => {
+                            if exit.status_code != 0 {
+                                tracing::error!("=== Install script FAILED with exit code {} ===", exit.status_code);
+                            } else {
+                                tracing::info!("=== Install script completed successfully ===");
+                            }
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            tracing::error!("[install] Wait error: {}", e);
+                            break;
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
+
+        // Container should auto-remove, but clean up just in case
+        let _ = self.docker.remove_container(
+            &install_container_name,
+            Some(RemoveContainerOptions { force: true, ..Default::default() })
+        ).await;
 
         Ok(())
     }

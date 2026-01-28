@@ -9,10 +9,17 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Allocation, AppState, CreateAllocationRequest, CreateIpPoolRequest, IpPool};
 
 pub async fn list_allocations(State(state): State<AppState>) -> AppResult<Json<Vec<Allocation>>> {
-    let allocations: Vec<Allocation> =
-        sqlx::query_as("SELECT * FROM allocations ORDER BY created_at DESC")
-            .fetch_all(&state.db)
-            .await?;
+    // Only return allocations that are NOT already assigned to a container
+    let allocations: Vec<Allocation> = sqlx::query_as(
+        r#"SELECT a.* FROM allocations a
+           WHERE NOT EXISTS (
+               SELECT 1 FROM container_allocations ca
+               WHERE ca.allocation_id = a.id
+           )
+           ORDER BY a.created_at DESC"#
+    )
+        .fetch_all(&state.db)
+        .await?;
     Ok(Json(allocations))
 }
 

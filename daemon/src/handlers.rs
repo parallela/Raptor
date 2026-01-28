@@ -283,28 +283,19 @@ pub async fn create_container(
     save_container_state(&state).await;
 
     // Run install script if provided (from flake)
+    // We run this in a separate temporary container that shares the same volume
+    // This avoids issues with the main container's restart policy
     if let Some(ref script) = req.install_script {
         tracing::info!("Running install script for container {}", req.name);
 
-        // Start the container first so install script can run
-        if let Err(e) = state.docker.start_container(&docker_id).await {
-            tracing::warn!("Failed to start container for install: {}", e);
-        }
-
-        // Execute install script inside the container
-        match state.docker.run_install_script(&docker_id, script, &req.environment).await {
+        match state.docker.run_install_in_temp_container(&req.name, &req.image, script, &req.environment).await {
             Ok(_) => {
                 tracing::info!("Install script completed for container {}", req.name);
             }
             Err(e) => {
                 tracing::error!("Install script failed for container {}: {}", req.name, e);
-                // Don't fail - container is still created, user can retry install
+                // Don't fail - container is still created, user can retry install manually
             }
-        }
-
-        // Stop the container after install
-        if let Err(e) = state.docker.graceful_stop(&docker_id, 10).await {
-            tracing::warn!("Failed to stop container after install: {}", e);
         }
     }
 

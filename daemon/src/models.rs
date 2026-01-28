@@ -66,6 +66,15 @@ pub struct ManagedContainer {
     #[serde(default)]
     pub allocations: Vec<ContainerAllocation>,
     pub resources: ContainerResources,
+    /// Install script from flake (runs on first start)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_script: Option<String>,
+    /// Whether the install script has been run
+    #[serde(default)]
+    pub installed: bool,
+    /// Environment variables for install/startup
+    #[serde(default)]
+    pub environment: std::collections::HashMap<String, String>,
 }
 
 /// Container allocation with full details

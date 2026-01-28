@@ -147,8 +147,12 @@ pub async fn create_container(
         env_vars.entry("SERVER_MEMORY".to_string())
             .or_insert_with(|| req.memory_limit.to_string());
 
+        // Use user-provided startup_script if present, otherwise use flake's
+        let startup_base = req.startup_script.clone()
+            .unwrap_or_else(|| flake.startup_command.clone());
+
         // Replace {{VAR}} placeholders in startup command
-        let mut startup = flake.startup_command.clone();
+        let mut startup = startup_base;
         for (key, value) in &env_vars {
             startup = startup.replace(&format!("{{{{{}}}}}", key), value);
         }
