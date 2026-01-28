@@ -328,6 +328,7 @@ impl DockerManager {
 
     /// Run install script in a temporary container that shares the same volume as the target container
     /// This avoids issues with the main container's restart policy
+    /// If log_tx is provided, install logs will be sent through it (for WebSocket streaming)
     pub async fn run_install_in_temp_container(
         &self,
         container_name: &str,
@@ -335,8 +336,21 @@ impl DockerManager {
         script: &str,
         env: &std::collections::HashMap<String, String>,
     ) -> anyhow::Result<()> {
+        self.run_install_in_temp_container_with_logs(container_name, image, script, env, None).await
+    }
+
+    /// Run install script with optional log streaming
+    pub async fn run_install_in_temp_container_with_logs(
+        &self,
+        container_name: &str,
+        image: &str,
+        script: &str,
+        env: &std::collections::HashMap<String, String>,
+        log_tx: Option<broadcast::Sender<String>>,
+    ) -> anyhow::Result<()> {
         use bollard::container::{CreateContainerOptions, Config, LogsOptions, RemoveContainerOptions, WaitContainerOptions};
         use futures_util::StreamExt;
+
 
         let install_container_name = format!("{}-install", container_name);
         tracing::info!("=== Starting installation for container {} ===", container_name);
@@ -417,7 +431,9 @@ impl DockerManager {
 
         let config = Config {
             image: Some(image),
-            cmd: Some(vec!["bash", "-c", &full_script]),
+            // Override entrypoint to run bash directly (not through the image's entrypoint.sh)
+            entrypoint: Some(vec!["bash", "-c"]),
+            cmd: Some(vec![&full_script]),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
             env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
@@ -443,13 +459,39 @@ impl DockerManager {
 
         // Start the container
         self.docker.start_container::<String>(&create_result.id, None).await?;
-        tracing::info!("Install container started, streaming logs...");
+        tracing::info!("Install container started: {}", create_result.id);
+
+        // Small delay to let the container initialize
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Check if container is still running
+        match self.docker.inspect_container(&create_result.id, None).await {
+            Ok(info) => {
+                let state = info.state.as_ref();
+                let status = state.and_then(|s| s.status.as_ref()).map(|s| format!("{:?}", s)).unwrap_or_else(|| "unknown".to_string());
+                let running = state.and_then(|s| s.running).unwrap_or(false);
+                let exit_code = state.and_then(|s| s.exit_code).unwrap_or(-1);
+                tracing::info!("Install container status: {}, running: {}, exit_code: {}", status, running, exit_code);
+
+                // If already exited, get the logs anyway
+                if !running && exit_code != 0 {
+                    tracing::error!("Install container exited immediately with code {}", exit_code);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Could not inspect install container: {}", e);
+            }
+        }
+
+        tracing::info!("Starting log stream for install container...");
 
         // Stream logs while waiting
         let log_options = LogsOptions::<String> {
             follow: true,
             stdout: true,
             stderr: true,
+            since: 0, // Get all logs from the beginning
+            timestamps: false,
             ..Default::default()
         };
 
@@ -459,8 +501,21 @@ impl DockerManager {
         let wait_options = WaitContainerOptions { condition: "not-running" };
         let mut wait_stream = self.docker.wait_container(&create_result.id, Some(wait_options));
 
-        // Process logs until container exits
+        // Process logs until container exits (with timeout)
+        let timeout = tokio::time::Duration::from_secs(300); // 5 minute timeout for install
+        let start_time = std::time::Instant::now();
+
         loop {
+            if start_time.elapsed() > timeout {
+                tracing::error!("Install script timed out after 5 minutes");
+                if let Some(ref tx) = log_tx {
+                    let _ = tx.send("\x1b[31m[Install] Installation timed out after 5 minutes\x1b[0m".to_string());
+                }
+                // Kill the container
+                let _ = self.docker.kill_container::<String>(&create_result.id, None).await;
+                break;
+            }
+
             tokio::select! {
                 log_msg = logs.next() => {
                     match log_msg {
@@ -469,22 +524,38 @@ impl DockerManager {
                             for line in text.lines() {
                                 if !line.trim().is_empty() {
                                     tracing::info!("[install] {}", line.trim());
+                                    // Send to WebSocket if connected
+                                    if let Some(ref tx) = log_tx {
+                                        let _ = tx.send(format!("\x1b[36m[Install]\x1b[0m {}", line.trim()));
+                                    }
                                 }
                             }
                         }
                         Some(Err(e)) => {
                             tracing::warn!("[install] Log stream error: {}", e);
                         }
-                        None => break, // Log stream ended
+                        None => {
+                            tracing::info!("[install] Log stream ended");
+                            break;
+                        }
                     }
                 }
                 wait_result = wait_stream.next() => {
                     match wait_result {
                         Some(Ok(exit)) => {
+                            // Get any remaining logs after exit
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
                             if exit.status_code != 0 {
                                 tracing::error!("=== Install script FAILED with exit code {} ===", exit.status_code);
+                                if let Some(ref tx) = log_tx {
+                                    let _ = tx.send(format!("\x1b[31m[Install] Installation FAILED with exit code {}\x1b[0m", exit.status_code));
+                                }
                             } else {
                                 tracing::info!("=== Install script completed successfully ===");
+                                if let Some(ref tx) = log_tx {
+                                    let _ = tx.send("\x1b[32m[Install] Installation completed successfully!\x1b[0m".to_string());
+                                }
                             }
                             break;
                         }
@@ -505,9 +576,7 @@ impl DockerManager {
         ).await;
 
         Ok(())
-    }
-
-    /// Gracefully stop container by sending a stop command first, then using docker stop
+    }    /// Gracefully stop container by sending a stop command first, then using docker stop
     /// This allows the log stream to capture shutdown logs, then properly stops the container
     /// so that the "unless-stopped" restart policy doesn't restart it
     pub async fn graceful_stop(&self, id: &str, timeout_secs: u64) -> anyhow::Result<()> {
