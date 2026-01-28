@@ -118,6 +118,54 @@ pub async fn create_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // Load flake if provided
+    let (image, startup_script, flake_id, install_script, flake_variables) = if let Some(fid) = req.flake_id {
+        let flake: crate::handlers::flakes::Flake = sqlx::query_as("SELECT * FROM flakes WHERE id = $1")
+            .bind(fid)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::BadRequest("Flake not found".into()))?;
+
+        // Get flake variables with defaults
+        let vars: Vec<crate::handlers::flakes::FlakeVariable> = sqlx::query_as(
+            "SELECT * FROM flake_variables WHERE flake_id = $1 ORDER BY sort_order"
+        )
+            .bind(fid)
+            .fetch_all(&state.db)
+            .await?;
+
+        // Build environment variables map (defaults + user overrides)
+        let mut env_vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for var in &vars {
+            let value = req.variables.get(&var.env_variable)
+                .cloned()
+                .unwrap_or_else(|| var.default_value.clone().unwrap_or_default());
+            env_vars.insert(var.env_variable.clone(), value);
+        }
+
+        // Add SERVER_MEMORY from memory_limit if not set
+        env_vars.entry("SERVER_MEMORY".to_string())
+            .or_insert_with(|| req.memory_limit.to_string());
+
+        // Replace {{VAR}} placeholders in startup command
+        let mut startup = flake.startup_command.clone();
+        for (key, value) in &env_vars {
+            startup = startup.replace(&format!("{{{{{}}}}}", key), value);
+        }
+
+        (
+            flake.docker_image,
+            Some(startup),
+            Some(fid),
+            flake.install_script,
+            env_vars,
+        )
+    } else {
+        // No flake - require image
+        let image = req.image.clone().ok_or(AppError::BadRequest("Either flake_id or image is required".into()))?;
+        (image, req.startup_script.clone(), None, None, std::collections::HashMap::new())
+    };
+
     // Generate container UUID first - this will be used as the Docker container name
     let container_id = Uuid::new_v4();
     let container_name_for_docker = container_id.to_string();
@@ -183,15 +231,17 @@ pub async fn create_container(
     // Use container UUID as the Docker container name
     let daemon_req = serde_json::json!({
         "name": container_name_for_docker,
-        "image": req.image,
-        "startupScript": req.startup_script,
+        "image": image,
+        "startupScript": startup_script,
         "memoryLimit": req.memory_limit,
         "cpuLimit": req.cpu_limit,
         "diskLimit": req.disk_limit,
         "swapLimit": req.swap_limit,
         "ioWeight": req.io_weight,
         "ports": port_mappings,
-        "allocations": allocations_for_daemon
+        "allocations": allocations_for_daemon,
+        "installScript": install_script,
+        "environment": flake_variables
     });
 
     let res = client
@@ -230,17 +280,18 @@ pub async fn create_container(
 
     let container: Container = sqlx::query_as(
         r#"
-        INSERT INTO containers (id, user_id, daemon_id, name, image, startup_script, stop_command, status, memory_limit, cpu_limit, disk_limit, swap_limit, io_weight, sftp_user, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'stopped', $8, $9, $10, $11, $12, $13, $14, $14)
+        INSERT INTO containers (id, user_id, daemon_id, flake_id, name, image, startup_script, stop_command, status, memory_limit, cpu_limit, disk_limit, swap_limit, io_weight, sftp_user, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stopped', $9, $10, $11, $12, $13, $14, $15, $15)
         RETURNING *
         "#,
     )
     .bind(container_id)
     .bind(user_id)
     .bind(req.daemon_id)
+    .bind(flake_id)
     .bind(&req.name)  // Store user-friendly name in DB
-    .bind(&req.image)
-    .bind(&req.startup_script)
+    .bind(&image)
+    .bind(&startup_script)
     .bind(&stop_command)
     .bind(req.memory_limit)
     .bind(rust_decimal::Decimal::try_from(req.cpu_limit).unwrap_or_default())

@@ -1,0 +1,49 @@
+{
+  "name": "Vanilla Minecraft",
+  "slug": "vanilla",
+  "author": "Raptor Panel",
+  "description": "The official Minecraft server from Mojang.",
+  "dockerImage": "artifacts.lstan.eu/java:21",
+  "startupCommand": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}} nogui",
+  "configFiles": {
+    "server.properties": {
+      "parser": "properties",
+      "find": {
+        "server-ip": "0.0.0.0",
+        "server-port": "{{server.build.default.port}}",
+        "query.port": "{{server.build.default.port}}"
+      }
+    }
+  },
+  "startupDetection": ")! For help, type ",
+  "installScript": "#!/bin/bash\ncd /home/container\n\nLATEST_VERSION=$(curl -s https://launchermeta.mojang.com/mc/game/version_manifest.json | jq -r '.latest.release')\n\nif [ \"${MINECRAFT_VERSION}\" == \"latest\" ]; then\n    MINECRAFT_VERSION=${LATEST_VERSION}\nfi\n\necho \"Downloading Minecraft ${MINECRAFT_VERSION}\"\n\nMANIFEST_URL=$(curl -s https://launchermeta.mojang.com/mc/game/version_manifest.json | jq -r --arg VERSION \"${MINECRAFT_VERSION}\" '.versions[] | select(.id == $VERSION) | .url')\n\nif [ -z \"${MANIFEST_URL}\" ]; then\n    echo \"Version ${MINECRAFT_VERSION} not found, using latest\"\n    MANIFEST_URL=$(curl -s https://launchermeta.mojang.com/mc/game/version_manifest.json | jq -r --arg VERSION \"${LATEST_VERSION}\" '.versions[] | select(.id == $VERSION) | .url')\nfi\n\nSERVER_URL=$(curl -s ${MANIFEST_URL} | jq -r '.downloads.server.url')\n\nif [ -f ${SERVER_JARFILE} ]; then\n    mv ${SERVER_JARFILE} ${SERVER_JARFILE}.old\nfi\n\ncurl -o ${SERVER_JARFILE} ${SERVER_URL}\n\necho \"eula=true\" > eula.txt\necho \"EULA accepted automatically\"\n\nif [ ! -f server.properties ]; then\n    cat > server.properties << EOF\nserver-port=25565\nquery.port=25565\nserver-ip=0.0.0.0\nEOF\nfi",
+  "variables": [
+    {
+      "name": "Server Memory",
+      "description": "The maximum amount of memory (MB) the server can use.",
+      "envVariable": "SERVER_MEMORY",
+      "defaultValue": "1024",
+      "rules": "required|numeric|min:128",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Minecraft Version",
+      "description": "The version of Minecraft to download. Use 'latest' for the latest release.",
+      "envVariable": "MINECRAFT_VERSION",
+      "defaultValue": "latest",
+      "rules": "required|string|max:20",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Server Jar File",
+      "description": "The name of the server jarfile.",
+      "envVariable": "SERVER_JARFILE",
+      "defaultValue": "server.jar",
+      "rules": "required|string|max:100",
+      "userViewable": true,
+      "userEditable": true
+    }
+  ]
+}

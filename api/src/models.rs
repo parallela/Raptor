@@ -300,7 +300,11 @@ pub struct PortMapping {
 pub struct CreateContainerRequest {
     pub daemon_id: Uuid,
     pub name: String,
-    pub image: String,
+    /// Flake ID - if provided, image and startup_script will be taken from the flake
+    pub flake_id: Option<Uuid>,
+    /// Docker image - required if flake_id is not provided
+    pub image: Option<String>,
+    /// Startup script - optional, will use flake's startupCommand if flake_id is provided
     pub startup_script: Option<String>,
     /// Command to execute for graceful stop (e.g., "stop" for Minecraft)
     pub stop_command: Option<String>,
@@ -323,6 +327,9 @@ pub struct CreateContainerRequest {
     pub ports: Vec<PortMapping>,
     /// User ID to assign the container to (admin only, defaults to current user)
     pub user_id: Option<Uuid>,
+    /// Variable values for the flake (envVariable -> value)
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
 }
 
 fn default_memory() -> i64 { 512 }

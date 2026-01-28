@@ -267,13 +267,13 @@ pub async fn create_container(
 
     let managed = ManagedContainer {
         name: req.name.clone(),
-        docker_id,
-        image: req.image,
-        startup_script: req.startup_script,
-        stop_command: req.stop_command,
-        allocation: req.allocation,
-        allocations: req.allocations,
-        resources,
+        docker_id: docker_id.clone(),
+        image: req.image.clone(),
+        startup_script: req.startup_script.clone(),
+        stop_command: req.stop_command.clone(),
+        allocation: req.allocation.clone(),
+        allocations: req.allocations.clone(),
+        resources: resources.clone(),
     };
 
     // Insert into state - guard dropped immediately
@@ -281,6 +281,32 @@ pub async fn create_container(
 
     // Save state asynchronously (no locks held)
     save_container_state(&state).await;
+
+    // Run install script if provided (from flake)
+    if let Some(ref script) = req.install_script {
+        tracing::info!("Running install script for container {}", req.name);
+
+        // Start the container first so install script can run
+        if let Err(e) = state.docker.start_container(&docker_id).await {
+            tracing::warn!("Failed to start container for install: {}", e);
+        }
+
+        // Execute install script inside the container
+        match state.docker.run_install_script(&docker_id, script, &req.environment).await {
+            Ok(_) => {
+                tracing::info!("Install script completed for container {}", req.name);
+            }
+            Err(e) => {
+                tracing::error!("Install script failed for container {}: {}", req.name, e);
+                // Don't fail - container is still created, user can retry install
+            }
+        }
+
+        // Stop the container after install
+        if let Err(e) = state.docker.graceful_stop(&docker_id, 10).await {
+            tracing::warn!("Failed to stop container after install: {}", e);
+        }
+    }
 
     Ok(Json(managed))
 }

@@ -224,6 +224,65 @@ impl DockerManager {
         Ok(())
     }
 
+    /// Run an install script inside a container using docker exec
+    /// This is used to set up the server files when creating from a flake
+    pub async fn run_install_script(&self, id: &str, script: &str, env: &std::collections::HashMap<String, String>) -> anyhow::Result<()> {
+        use bollard::exec::{CreateExecOptions, StartExecResults};
+        use futures_util::StreamExt;
+
+        tracing::info!("Running install script in container {}", id);
+
+        // Build environment variables array
+        let env_vars: Vec<String> = env.iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+
+        // Create exec instance to run bash with the script
+        let exec = self.docker.create_exec(
+            id,
+            CreateExecOptions {
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                cmd: Some(vec!["bash", "-c", script]),
+                env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
+                working_dir: Some("/home/container"),
+                user: Some("container"),
+                ..Default::default()
+            }
+        ).await?;
+
+        // Start the exec and stream output
+        let start_result = self.docker.start_exec(&exec.id, None).await?;
+
+        if let StartExecResults::Attached { mut output, .. } = start_result {
+            while let Some(msg) = output.next().await {
+                match msg {
+                    Ok(m) => {
+                        let text = m.to_string();
+                        if !text.trim().is_empty() {
+                            tracing::info!("[install] {}", text.trim());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Install script error: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Check exec exit code
+        let exec_inspect = self.docker.inspect_exec(&exec.id).await?;
+        if let Some(exit_code) = exec_inspect.exit_code {
+            if exit_code != 0 {
+                tracing::warn!("Install script exited with code {}", exit_code);
+            } else {
+                tracing::info!("Install script completed successfully");
+            }
+        }
+
+        Ok(())
+    }
+
     /// Gracefully stop container by sending a stop command first, then using docker stop
     /// This allows the log stream to capture shutdown logs, then properly stops the container
     /// so that the "unless-stopped" restart policy doesn't restart it
@@ -232,12 +291,12 @@ impl DockerManager {
         // This properly stops the container so "unless-stopped" won't restart it
         // The container's entrypoint will receive SIGTERM and can shut down gracefully
         tracing::info!("Stopping container {} with {}s timeout", id, timeout_secs);
-        
+
         let timeout: i64 = timeout_secs.try_into().unwrap_or(30);
         self.docker
             .stop_container(id, Some(StopContainerOptions { t: timeout }))
             .await?;
-        
+
         tracing::info!("Container {} stopped", id);
         Ok(())
     }

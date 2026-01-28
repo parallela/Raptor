@@ -141,6 +141,11 @@ pub struct CreateContainerRequest {
     pub swap_limit: i64,
     #[serde(default = "default_io")]
     pub io_weight: i32,
+    /// Install script to run when creating the container (from flake)
+    pub install_script: Option<String>,
+    /// Environment variables for the container
+    #[serde(default)]
+    pub environment: std::collections::HashMap<String, String>,
 }
 
 fn default_memory() -> i64 { 512 }

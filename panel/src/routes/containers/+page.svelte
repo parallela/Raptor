@@ -6,64 +6,26 @@
     import UserSearch from '$lib/components/UserSearch.svelte';
     import { goto } from '$app/navigation';
     import toast from 'svelte-french-toast';
-    import type { Container, Daemon, User } from '$lib/types';
+    import type { Container, Daemon, User, Flake, FlakeVariable } from '$lib/types';
 
-    interface ImagePreset {
-        name: string;
-        image: string;
-        description: string;
-        defaultStartup?: string;
+    interface FlakeWithVariables extends Flake {
+        variables: FlakeVariable[];
     }
-
-    const imagePresets: ImagePreset[] = [
-        {
-            name: 'Minecraft (Java 21)',
-            image: 'ghcr.io/pterodactyl/yolks:java_21',
-            description: 'Java 21 for modern Minecraft servers',
-            defaultStartup: 'java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar nogui'
-        },
-        {
-            name: 'Minecraft (Java 17)',
-            image: 'ghcr.io/pterodactyl/yolks:java_17',
-            description: 'Java 17 for Minecraft 1.17+',
-            defaultStartup: 'java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar nogui'
-        },
-        {
-            name: 'Minecraft (Java 11)',
-            image: 'ghcr.io/pterodactyl/yolks:java_11',
-            description: 'Java 11 for older Minecraft versions',
-            defaultStartup: 'java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar nogui'
-        },
-        {
-            name: 'Node.js 20',
-            image: 'ghcr.io/pterodactyl/yolks:nodejs_20',
-            description: 'Node.js 20 LTS runtime',
-            defaultStartup: 'npm start'
-        },
-        {
-            name: 'Python 3.11',
-            image: 'ghcr.io/pterodactyl/yolks:python_3.11',
-            description: 'Python 3.11 runtime',
-            defaultStartup: 'python main.py'
-        },
-        {
-            name: 'Custom Image',
-            image: '',
-            description: 'Use your own Docker image'
-        }
-    ];
 
     let containers: Container[] = [];
     let daemons: Daemon[] = [];
+    let flakes: Flake[] = [];
     let loading = true;
     let showCreate = false;
     let creating = false;
-    let selectedPreset: ImagePreset | null = null;
+    let selectedFlake: FlakeWithVariables | null = null;
     let selectedUser: User | null = null;
+    let flakeVariables: Record<string, string> = {};
 
     let newContainer = {
         daemonId: '',
         name: '',
+        flakeId: '',
         image: '',
         startupScript: '',
         allocationId: '',
@@ -87,9 +49,10 @@
     async function loadData() {
         loading = true;
         try {
-            [containers, daemons] = await Promise.all([
+            [containers, daemons, flakes] = await Promise.all([
                 api.listContainers(),
-                api.listDaemons()
+                api.listDaemons(),
+                api.request<Flake[]>('/flakes')
             ]);
         } catch (e) {
             console.error(e);
@@ -98,33 +61,56 @@
         }
     }
 
-    function selectPreset(preset: ImagePreset) {
-        selectedPreset = preset;
-        if (preset.image) {
-            newContainer.image = preset.image;
+    async function selectFlake(flakeId: string) {
+        if (!flakeId) {
+            selectedFlake = null;
+            flakeVariables = {};
+            newContainer.image = '';
+            newContainer.startupScript = '';
+            return;
         }
-        if (preset.defaultStartup) {
-            newContainer.startupScript = preset.defaultStartup.replace('{{SERVER_MEMORY}}', String(newContainer.memoryLimit));
+        try {
+            selectedFlake = await api.request<FlakeWithVariables>(`/flakes/${flakeId}`);
+            // Initialize variables with defaults
+            flakeVariables = {};
+            for (const v of selectedFlake.variables) {
+                flakeVariables[v.envVariable] = v.defaultValue || '';
+            }
+            // Set SERVER_MEMORY from memory limit
+            flakeVariables['SERVER_MEMORY'] = String(newContainer.memoryLimit);
+        } catch (e: any) {
+            toast.error('Failed to load flake details');
         }
     }
 
     async function createContainer() {
         creating = true;
         try {
-            await api.createContainer({
+            const payload: Record<string, unknown> = {
                 daemonId: newContainer.daemonId,
                 name: newContainer.name,
-                image: newContainer.image,
-                startupScript: newContainer.startupScript || undefined,
                 allocationId: newContainer.allocationId || undefined,
                 memoryLimit: newContainer.memoryLimit,
                 cpuLimit: newContainer.cpuLimit,
                 diskLimit: newContainer.diskLimit,
                 userId: newContainer.userId || undefined
-            });
+            };
+
+            // If flake selected, use flake_id and variables
+            if (newContainer.flakeId && selectedFlake) {
+                payload.flakeId = newContainer.flakeId;
+                payload.variables = flakeVariables;
+            } else {
+                // Manual mode - require image
+                payload.image = newContainer.image;
+                payload.startupScript = newContainer.startupScript || undefined;
+            }
+
+            await api.createContainer(payload as any);
             showCreate = false;
-            newContainer = { daemonId: '', name: '', image: '', startupScript: '', allocationId: '', memoryLimit: 1024, cpuLimit: 1.0, diskLimit: 5120, userId: '' };
-            selectedPreset = null;
+            newContainer = { daemonId: '', name: '', flakeId: '', image: '', startupScript: '', allocationId: '', memoryLimit: 1024, cpuLimit: 1.0, diskLimit: 5120, userId: '' };
+            selectedFlake = null;
+            flakeVariables = {};
             selectedUser = null;
             await loadData();
             toast.success('Server created successfully');

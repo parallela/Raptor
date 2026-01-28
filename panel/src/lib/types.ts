@@ -112,3 +112,39 @@ export interface ServerTemplate {
     updatedAt: string;
 }
 
+export interface Flake {
+    id: string;
+    name: string;
+    slug: string;
+    author: string | null;
+    description: string | null;
+    dockerImage: string;
+    startupCommand: string;
+    configFiles: Record<string, unknown>;
+    startupDetection: string | null;
+    installScript: string | null;
+    installContainer: string | null;
+    installEntrypoint: string | null;
+    features: string[];
+    fileDenylist: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface FlakeVariable {
+    id: string;
+    flakeId: string;
+    name: string;
+    description: string | null;
+    envVariable: string;
+    defaultValue: string | null;
+    rules: string | null;
+    userViewable: boolean;
+    userEditable: boolean;
+    sortOrder: number;
+    createdAt: string;
+}
+
+export interface FlakeWithVariables extends Flake {
+    variables: FlakeVariable[];
+}

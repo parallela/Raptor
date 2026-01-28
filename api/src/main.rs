@@ -95,7 +95,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/daemons/:id", get(handlers::daemons::get_daemon))
         .route("/daemons/:id/status", get(handlers::daemons::get_daemon_status))
         .route("/roles", get(handlers::roles::list_roles))
-        .route("/roles/:id", get(handlers::roles::get_role));
+        .route("/roles/:id", get(handlers::roles::get_role))
+        // Flakes (server templates)
+        .route("/flakes", get(handlers::flakes::list_flakes))
+        .route("/flakes/:id", get(handlers::flakes::get_flake))
+        .route("/flakes/:id/export", get(handlers::flakes::export_flake));
 
     let manager_routes = Router::new()
         .route("/users", get(handlers::users::list_users))
@@ -120,6 +124,13 @@ async fn main() -> anyhow::Result<()> {
             .route_layer(axum_middleware::from_fn(require_permission("allocations.create"))))
         .route("/container-allocations/:id", delete(handlers::allocations::delete_container_allocation)
             .route_layer(axum_middleware::from_fn(require_permission("allocations.delete"))))
+        // Flakes management (admin only)
+        .route("/flakes", post(handlers::flakes::create_flake)
+            .route_layer(axum_middleware::from_fn(require_permission("flakes.create"))))
+        .route("/flakes/import", post(handlers::flakes::import_flake)
+            .route_layer(axum_middleware::from_fn(require_permission("flakes.create"))))
+        .route("/flakes/:id", delete(handlers::flakes::delete_flake)
+            .route_layer(axum_middleware::from_fn(require_permission("flakes.delete"))))
         .layer(axum_middleware::from_fn(require_manager));
 
     let admin_routes = Router::new()

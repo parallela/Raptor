@@ -1,0 +1,67 @@
+{
+  "name": "Paper",
+  "slug": "paper",
+  "author": "Raptor Panel",
+  "description": "High performance Spigot fork that aims to fix gameplay and mechanics inconsistencies.",
+  "dockerImage": "artifacts.lstan.eu/java:21",
+  "startupCommand": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}",
+  "configFiles": {
+    "server.properties": {
+      "parser": "properties",
+      "find": {
+        "server-ip": "0.0.0.0",
+        "server-port": "{{server.build.default.port}}",
+        "query.port": "{{server.build.default.port}}"
+      }
+    }
+  },
+  "startupDetection": ")! For help, type ",
+  "installScript": "#!/bin/bash\nPROJECT=paper\ncd /home/container\n\nif [ -n \"${DL_PATH}\" ]; then\n    echo \"Using supplied download url: ${DL_PATH}\"\n    DOWNLOAD_URL=$(eval echo $(echo ${DL_PATH} | sed -e 's/{{/${/g' -e 's/}}/}/g'))\nelse\n    VER_EXISTS=$(curl -s https://api.papermc.io/v2/projects/${PROJECT} | jq -r --arg VERSION $MINECRAFT_VERSION '.versions[] | contains($VERSION)' | grep -m1 true)\n    LATEST_VERSION=$(curl -s https://api.papermc.io/v2/projects/${PROJECT} | jq -r '.versions' | jq -r '.[-1]')\n\n    if [ \"${VER_EXISTS}\" == \"true\" ]; then\n        echo \"Version is valid. Using version ${MINECRAFT_VERSION}\"\n    else\n        echo \"Specified version not found. Defaulting to the latest ${PROJECT} version\"\n        MINECRAFT_VERSION=${LATEST_VERSION}\n    fi\n\n    BUILD_EXISTS=$(curl -s https://api.papermc.io/v2/projects/${PROJECT}/versions/${MINECRAFT_VERSION} | jq -r --arg BUILD ${BUILD_NUMBER} '.builds[] | tostring | contains($BUILD)' | grep -m1 true)\n    LATEST_BUILD=$(curl -s https://api.papermc.io/v2/projects/${PROJECT}/versions/${MINECRAFT_VERSION} | jq -r '.builds' | jq -r '.[-1]')\n\n    if [ \"${BUILD_EXISTS}\" == \"true\" ]; then\n        echo \"Build is valid for version ${MINECRAFT_VERSION}. Using build ${BUILD_NUMBER}\"\n    else\n        echo \"Using the latest ${PROJECT} build for version ${MINECRAFT_VERSION}\"\n        BUILD_NUMBER=${LATEST_BUILD}\n    fi\n\n    JAR_NAME=${PROJECT}-${MINECRAFT_VERSION}-${BUILD_NUMBER}.jar\n    DOWNLOAD_URL=https://api.papermc.io/v2/projects/${PROJECT}/versions/${MINECRAFT_VERSION}/builds/${BUILD_NUMBER}/downloads/${JAR_NAME}\nfi\n\necho \"Downloading: ${DOWNLOAD_URL}\"\n\nif [ -f ${SERVER_JARFILE} ]; then\n    mv ${SERVER_JARFILE} ${SERVER_JARFILE}.old\nfi\n\ncurl -o ${SERVER_JARFILE} ${DOWNLOAD_URL}\n\n# Auto-accept EULA\necho \"eula=true\" > eula.txt\necho \"EULA accepted automatically\"\n\nif [ ! -f server.properties ]; then\n    echo \"Creating default server.properties\"\n    cat > server.properties << EOF\nserver-port=25565\nquery.port=25565\nserver-ip=0.0.0.0\nEOF\nfi",
+  "variables": [
+    {
+      "name": "Server Memory",
+      "description": "The maximum amount of memory (MB) the server can use.",
+      "envVariable": "SERVER_MEMORY",
+      "defaultValue": "1024",
+      "rules": "required|numeric|min:128",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Minecraft Version",
+      "description": "The version of Minecraft to download. Leave at latest to always get the latest version.",
+      "envVariable": "MINECRAFT_VERSION",
+      "defaultValue": "latest",
+      "rules": "required|string|max:20",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Server Jar File",
+      "description": "The name of the server jarfile to run the server with.",
+      "envVariable": "SERVER_JARFILE",
+      "defaultValue": "server.jar",
+      "rules": "required|string|max:100",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Build Number",
+      "description": "The build number for the Paper release. Leave at latest for the latest build.",
+      "envVariable": "BUILD_NUMBER",
+      "defaultValue": "latest",
+      "rules": "required|string|max:20",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Download Path",
+      "description": "A URL to use to download a server.jar rather than using the PaperMC API.",
+      "envVariable": "DL_PATH",
+      "defaultValue": "",
+      "rules": "nullable|string",
+      "userViewable": false,
+      "userEditable": false
+    }
+  ]
+}
