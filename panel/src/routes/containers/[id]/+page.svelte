@@ -266,12 +266,13 @@
                 statsWs.close();
                 statsWs = null;
             }
-            // Use graceful stop with "stop" command for Minecraft servers
-            // The server has 30 seconds to stop gracefully before being force killed
-            await api.gracefulStop(containerId, 'stop', 30);
+            // Use graceful stop - docker stop sends SIGTERM to the container
+            // The server will receive the signal and shut down gracefully (show saving logs, etc.)
+            // The container has 30 seconds to stop before being force killed
+            await api.gracefulStop(containerId, 30);
             // Don't reload container immediately - let the logs show the shutdown
             // The WebSocket onclose handler will update the status when container stops
-            toast.success('Stop command sent');
+            toast.success('Stopping server...');
         } catch (e: any) {
             toast.error(e.message || 'Failed to stop server');
         } finally {

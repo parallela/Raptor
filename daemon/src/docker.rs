@@ -224,26 +224,21 @@ impl DockerManager {
         Ok(())
     }
 
-    /// Gracefully stop container by sending a stop command
-    /// We ONLY send the command and let the server shut down on its own
-    /// This allows the log stream to capture all shutdown logs naturally
-    pub async fn graceful_stop(&self, id: &str, stop_command: Option<&str>, _timeout_secs: u64) -> anyhow::Result<()> {
-        if let Some(cmd) = stop_command {
-            tracing::info!("Sending stop command '{}' to container {}", cmd, id);
-
-            // Send the stop command - the server will shut down on its own
-            // The log stream will continue to show all shutdown logs
-            self.send_command(id, cmd).await?;
-
-            // Don't call Docker stop - let the server shut down gracefully
-            // The log stream will show "Saving worlds...", "Server stopped", etc.
-            tracing::info!("Stop command sent to container {}, waiting for graceful shutdown", id);
-        } else {
-            // No stop command provided, use Docker's stop
-            tracing::info!("No stop command configured, using Docker stop for container {}", id);
-            self.stop_container(id).await?;
-        }
-
+    /// Gracefully stop container by sending a stop command first, then using docker stop
+    /// This allows the log stream to capture shutdown logs, then properly stops the container
+    /// so that the "unless-stopped" restart policy doesn't restart it
+    pub async fn graceful_stop(&self, id: &str, timeout_secs: u64) -> anyhow::Result<()> {
+        // Use Docker's stop command which sends SIGTERM then SIGKILL after timeout
+        // This properly stops the container so "unless-stopped" won't restart it
+        // The container's entrypoint will receive SIGTERM and can shut down gracefully
+        tracing::info!("Stopping container {} with {}s timeout", id, timeout_secs);
+        
+        let timeout: i64 = timeout_secs.try_into().unwrap_or(30);
+        self.docker
+            .stop_container(id, Some(StopContainerOptions { t: timeout }))
+            .await?;
+        
+        tracing::info!("Container {} stopped", id);
         Ok(())
     }
 

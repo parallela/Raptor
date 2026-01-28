@@ -120,10 +120,10 @@ export const api = {
             method: 'POST',
             body: JSON.stringify({ command })
         }),
-    gracefulStop: (id: string, stopCommand?: string, timeoutSecs: number = 10) =>
+    gracefulStop: (id: string, timeoutSecs: number = 30) =>
         request<{ success: boolean }>(`/containers/${id}/graceful-stop`, {
             method: 'POST',
-            body: JSON.stringify({ stopCommand, timeoutSecs })
+            body: JSON.stringify({ timeoutSecs })
         }),
     getContainerStats: (id: string) => request<{ cpuPercent: number; memoryUsage: number; memoryLimit: number; memoryPercent: number; networkRx: number; networkTx: number; blockRead: number; blockWrite: number }>(`/containers/${id}/stats`),
     setSftpPassword: (id: string, password: string) =>

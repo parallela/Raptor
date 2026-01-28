@@ -949,14 +949,12 @@ pub async fn send_command(
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GracefulStopRequest {
-    #[serde(default)]
-    pub stop_command: Option<String>,
     #[serde(default = "default_stop_timeout")]
     pub timeout_secs: u64,
 }
 
 fn default_stop_timeout() -> u64 {
-    10
+    30
 }
 
 pub async fn graceful_stop_container(
@@ -993,7 +991,6 @@ pub async fn graceful_stop_container(
         .post(&url)
         .header("X-API-Key", &daemon.api_key)
         .json(&serde_json::json!({
-            "stopCommand": req.stop_command,
             "timeoutSecs": req.timeout_secs
         }))
         .send()

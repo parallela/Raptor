@@ -470,31 +470,10 @@ pub async fn start_container(
 
         tracing::info!("Port bindings: {:?}", port_bindings);
 
-        // First, gracefully stop the container if it's running (send stop command and wait)
-        // This allows the server to save and show shutdown logs
-        if let Some(stop_cmd) = &container.stop_command {
-            tracing::info!("Sending graceful stop command '{}' before recreating", stop_cmd);
-            // Send stop command - ignore errors (container might not be running)
-            let _ = state.docker.send_command(&container.docker_id, stop_cmd).await;
-
-            // Wait for the container to stop gracefully (up to 30 seconds)
-            for _ in 0..60 {
-                match state.docker.get_container(&container.docker_id).await {
-                    Ok(info) => {
-                        let container_state = info.state.to_lowercase();
-                        if container_state != "running" {
-                            tracing::info!("Container stopped gracefully");
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        // Container doesn't exist, that's fine
-                        break;
-                    }
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            }
-        }
+        // Stop the container gracefully using docker stop (sends SIGTERM)
+        // This allows the server to shut down properly and show shutdown logs
+        // Ignore errors - container might not be running
+        let _ = state.docker.graceful_stop(&container.docker_id, 30).await;
 
         // Clean up ALL old containers with this name (force remove now that it's stopped)
         if let Err(e) = state.docker.cleanup_containers_by_name(&container.name).await {
@@ -554,29 +533,18 @@ pub async fn stop_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id and stop_command - guards dropped immediately
-    let (docker_id, stop_cmd) = {
-        if let Some(container) = state.containers.get(&id) {
-            (container.docker_id.clone(), container.stop_command.clone())
-        } else {
-            (id.clone(), None)
-        }
-    };
+    // Get docker_id - guards dropped immediately
+    let docker_id = get_docker_id(&state, &id);
 
     tracing::info!("Stopping container {} (docker_id: {})", id, docker_id);
 
-    // Use graceful stop if we have a stop command
-    if let Some(cmd) = stop_cmd {
-        state.docker
-            .graceful_stop(&docker_id, Some(&cmd), 30)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    } else {
-        state.docker
-            .stop_container(&docker_id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    }
+    // Use docker stop which sends SIGTERM - the server will shut down gracefully
+    // and show shutdown logs, then the container will be properly stopped
+    // (preventing "unless-stopped" from restarting it)
+    state.docker
+        .graceful_stop(&docker_id, 30)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
@@ -654,26 +622,9 @@ pub async fn recreate_container(
 
     tracing::info!("Total port bindings: {:?}", port_bindings);
 
-    // First, gracefully stop the container if it's running (send stop command and wait)
-    if let Some(stop_cmd) = &container.stop_command {
-        tracing::info!("Sending graceful stop command '{}' before recreating", stop_cmd);
-        let _ = state.docker.send_command(&container.docker_id, stop_cmd).await;
-
-        // Wait for the container to stop gracefully (up to 30 seconds)
-        for _ in 0..60 {
-            match state.docker.get_container(&container.docker_id).await {
-                Ok(info) => {
-                    let container_state = info.state.to_lowercase();
-                    if container_state != "running" {
-                        tracing::info!("Container stopped gracefully");
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        }
-    }
+    // Stop the container gracefully using docker stop (sends SIGTERM)
+    // Ignore errors - container might not be running
+    let _ = state.docker.graceful_stop(&container.docker_id, 30).await;
 
     // Clean up ALL old containers with this name (force remove now that it's stopped)
     if let Err(e) = state.docker.cleanup_containers_by_name(&container.name).await {
@@ -767,14 +718,12 @@ pub async fn send_command(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GracefulStopRequest {
-    #[serde(default)]
-    pub stop_command: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
 }
 
 fn default_timeout() -> u64 {
-    10
+    30
 }
 
 pub async fn graceful_stop_container(
@@ -787,13 +736,13 @@ pub async fn graceful_stop_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-
     // Get docker_id - guard dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
+    // Use docker stop which sends SIGTERM for graceful shutdown
     state
         .docker
-        .graceful_stop(&docker_id, req.stop_command.as_deref(), req.timeout_secs)
+        .graceful_stop(&docker_id, req.timeout_secs)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
