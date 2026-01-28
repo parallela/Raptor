@@ -155,6 +155,16 @@ fn update_container_docker_id(state: &AppState, name: &str, new_docker_id: Strin
     // Guard is dropped here
 }
 
+/// Mark a container as installed. Guard is dropped after the update.
+fn mark_container_installed(state: &AppState, name: &str) {
+    if let Some(mut entry) = state.containers.get_mut(name) {
+        entry.installed = true;
+        // Clear install script to save memory
+        entry.install_script = None;
+    }
+    // Guard is dropped here
+}
+
 // ============================================================================
 // AUTHENTICATION
 // ============================================================================
