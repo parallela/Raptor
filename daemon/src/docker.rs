@@ -263,6 +263,7 @@ impl DockerManager {
 
     /// Remove all containers matching a name (both running and stopped)
     /// This is useful to clean up old containers before recreating
+    /// NOTE: Containers should already be stopped gracefully before calling this
     pub async fn cleanup_containers_by_name(&self, name: &str) -> anyhow::Result<u32> {
         let options = ListContainersOptions {
             all: true,
@@ -288,8 +289,7 @@ impl DockerManager {
 
                 if container_name == name {
                     tracing::info!("Cleaning up old container: {} ({})", container_name, id);
-                    // Force stop and remove
-                    let _ = self.docker.stop_container(&id, Some(StopContainerOptions { t: 1 })).await;
+                    // Force remove (container should already be stopped)
                     if let Err(e) = self.docker.remove_container(&id, Some(RemoveContainerOptions { force: true, ..Default::default() })).await {
                         tracing::warn!("Failed to remove container {}: {}", id, e);
                     } else {
