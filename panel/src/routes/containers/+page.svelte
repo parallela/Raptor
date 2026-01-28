@@ -29,7 +29,8 @@
         image: '',
         startupScript: '',
         allocationId: '',
-        memoryLimit: 1024,
+        memoryLimit: 1280,
+        serverMemory: 1024,
         cpuLimit: 1.0,
         diskLimit: 5120,
         userId: ''
@@ -77,8 +78,8 @@
                 for (const v of selectedFlake.variables) {
                     flakeVariables[v.envVariable] = v.defaultValue || '';
                 }
-                // Set SERVER_MEMORY from memory limit
-                flakeVariables['SERVER_MEMORY'] = String(newContainer.memoryLimit);
+                // Set SERVER_MEMORY from server memory (JVM heap)
+                flakeVariables['SERVER_MEMORY'] = String(newContainer.serverMemory);
                 // Pre-fill startup command from flake
                 newContainer.startupScript = selectedFlake.startupCommand;
             }
@@ -95,6 +96,7 @@
                 name: newContainer.name,
                 allocationId: newContainer.allocationId || undefined,
                 memoryLimit: newContainer.memoryLimit,
+                serverMemory: newContainer.serverMemory,
                 cpuLimit: newContainer.cpuLimit,
                 diskLimit: newContainer.diskLimit,
                 userId: newContainer.userId || undefined,
@@ -112,7 +114,7 @@
 
             await api.createContainer(payload as any);
             showCreate = false;
-            newContainer = { daemonId: '', name: '', flakeId: '', image: '', startupScript: '', allocationId: '', memoryLimit: 1024, cpuLimit: 1.0, diskLimit: 5120, userId: '' };
+            newContainer = { daemonId: '', name: '', flakeId: '', image: '', startupScript: '', allocationId: '', memoryLimit: 1280, serverMemory: 1024, cpuLimit: 1.0, diskLimit: 5120, userId: '' };
             selectedFlake = null;
             flakeVariables = {};
             selectedUser = null;
@@ -363,10 +365,16 @@
                     </div>
 
                     <!-- Resource Limits -->
-                    <div class="grid grid-cols-3 gap-4">
+                    <div class="grid grid-cols-2 gap-4">
                         <div class="input-group">
-                            <label for="memory" class="input-label">Memory (MB)</label>
+                            <label for="serverMemory" class="input-label">Server Memory (MB)</label>
+                            <input type="number" id="serverMemory" bind:value={newContainer.serverMemory} class="input" min="128" step="128" required />
+                            <p class="text-xs text-dark-500 mt-1">JVM heap (-Xmx)</p>
+                        </div>
+                        <div class="input-group">
+                            <label for="memory" class="input-label">Container Memory (MB)</label>
                             <input type="number" id="memory" bind:value={newContainer.memoryLimit} class="input" min="128" step="128" required />
+                            <p class="text-xs text-dark-500 mt-1">Docker limit (~20% higher)</p>
                         </div>
                         <div class="input-group">
                             <label for="cpu" class="input-label">CPU Cores</label>

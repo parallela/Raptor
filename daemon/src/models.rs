@@ -93,7 +93,11 @@ pub struct ContainerAllocation {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ContainerResources {
+    /// Docker container memory limit in MB (should be higher than server_memory to allow for JVM overhead)
     pub memory_limit: i64,
+    /// Server/JVM heap memory in MB (used for -Xmx in startup command via {{SERVER_MEMORY}})
+    #[serde(default)]
+    pub server_memory: i64,
     pub cpu_limit: f64,
     pub disk_limit: i64,
     pub swap_limit: i64,
@@ -140,8 +144,12 @@ pub struct CreateContainerRequest {
     pub allocations: Vec<ContainerAllocation>,
     #[serde(default)]
     pub ports: Vec<PortMapping>,
+    /// Docker container memory limit in MB
     #[serde(default = "default_memory")]
     pub memory_limit: i64,
+    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
+    #[serde(default)]
+    pub server_memory: Option<i64>,
     #[serde(default = "default_cpu")]
     pub cpu_limit: f64,
     #[serde(default = "default_disk")]
@@ -162,6 +170,70 @@ fn default_cpu() -> f64 { 1.0 }
 fn default_disk() -> i64 { 5120 }
 fn default_io() -> i32 { 500 }
 
+/// Helper to deserialize a value that might be a string or a number
+fn deserialize_string_or_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+
+    struct StringOrF64Visitor;
+
+    impl<'de> Visitor<'de> for StringOrF64Visitor {
+        type Value = Option<f64>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a number")
+        }
+
+        fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v))
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v as f64))
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v as f64))
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            // Handle comma as decimal separator (European format)
+            let normalized = v.replace(',', ".");
+            normalized.parse::<f64>().map(Some).map_err(de::Error::custom)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrF64Visitor)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssignAllocationRequest {
@@ -173,9 +245,13 @@ pub struct AssignAllocationRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateContainerRequest {
+    /// Docker container memory limit in MB
     #[serde(default)]
     pub memory_limit: Option<i64>,
+    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
     #[serde(default)]
+    pub server_memory: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_string_or_f64")]
     pub cpu_limit: Option<f64>,
     #[serde(default)]
     pub disk_limit: Option<i64>,

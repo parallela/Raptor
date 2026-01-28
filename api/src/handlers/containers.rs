@@ -143,8 +143,10 @@ pub async fn create_container(
             env_vars.insert(var.env_variable.clone(), value);
         }
 
-        // Always set SERVER_MEMORY from the actual memory_limit (overrides flake default)
-        env_vars.insert("SERVER_MEMORY".to_string(), req.memory_limit.to_string());
+        // Set SERVER_MEMORY from server_memory (JVM heap) or fall back to memory_limit
+        // server_memory is for the JVM heap (-Xmx), memory_limit is for Docker container limit
+        let server_memory = req.server_memory.unwrap_or(req.memory_limit);
+        env_vars.insert("SERVER_MEMORY".to_string(), server_memory.to_string());
 
         // Use user-provided startup_script if present, otherwise use flake's
         // NOTE: We send the startup script with {{VAR}} placeholders intact.
@@ -230,11 +232,15 @@ pub async fn create_container(
     }
 
     // Use container UUID as the Docker container name
+    // server_memory is for JVM heap (-Xmx), memory_limit is Docker container limit
+    let server_memory = req.server_memory.unwrap_or(req.memory_limit);
+
     let daemon_req = serde_json::json!({
         "name": container_name_for_docker,
         "image": image,
         "startupScript": startup_script,
         "memoryLimit": req.memory_limit,
+        "serverMemory": server_memory,
         "cpuLimit": req.cpu_limit,
         "diskLimit": req.disk_limit,
         "swapLimit": req.swap_limit,
@@ -473,8 +479,12 @@ pub async fn delete_container(
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateContainerRequest {
+    /// Docker container memory limit in MB
     #[serde(default)]
     pub memory_limit: Option<i64>,
+    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
+    #[serde(default)]
+    pub server_memory: Option<i64>,
     #[serde(default)]
     pub cpu_limit: Option<f64>,
     #[serde(default)]
@@ -509,6 +519,7 @@ pub async fn update_container(
 
     // Check if user is trying to change resource limits
     let changing_resources = req.memory_limit.is_some()
+        || req.server_memory.is_some()
         || req.cpu_limit.is_some()
         || req.disk_limit.is_some()
         || req.swap_limit.is_some()
@@ -530,6 +541,9 @@ pub async fn update_container(
 
     if let Some(memory) = req.memory_limit {
         daemon_payload["memoryLimit"] = serde_json::json!(memory);
+    }
+    if let Some(server_memory) = req.server_memory {
+        daemon_payload["serverMemory"] = serde_json::json!(server_memory);
     }
     if let Some(cpu) = req.cpu_limit {
         daemon_payload["cpuLimit"] = serde_json::json!(cpu);

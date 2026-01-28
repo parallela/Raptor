@@ -167,7 +167,7 @@ fn mark_container_installed(state: &AppState, name: &str) {
 
 /// Replace {{VAR}} placeholders in a startup script with actual values from environment and resources
 /// Also handles backward compatibility: if SERVER_MEMORY was already replaced with a hardcoded value,
-/// it will update -Xmx and -Xms parameters to use the current memory_limit
+/// it will update -Xmx and -Xms parameters to use the current server_memory
 fn replace_startup_placeholders(
     script: &str,
     environment: &std::collections::HashMap<String, String>,
@@ -180,17 +180,24 @@ fn replace_startup_placeholders(
         result = result.replace(&format!("{{{{{}}}}}", key), value);
     }
 
-    // Replace {{SERVER_MEMORY}} with actual memory_limit from resources
-    result = result.replace("{{SERVER_MEMORY}}", &resources.memory_limit.to_string());
+    // Use server_memory for {{SERVER_MEMORY}} - this is the JVM heap memory
+    // If server_memory is 0, fall back to memory_limit for backward compatibility
+    let server_memory = if resources.server_memory > 0 {
+        resources.server_memory
+    } else {
+        resources.memory_limit
+    };
+
+    // Replace {{SERVER_MEMORY}} with server_memory from resources
+    result = result.replace("{{SERVER_MEMORY}}", &server_memory.to_string());
 
     // Backward compatibility: If -Xmx is hardcoded with a different value, update it
     // This handles old containers where {{SERVER_MEMORY}} was already replaced
-    let memory_str = resources.memory_limit.to_string();
+    let memory_str = server_memory.to_string();
 
-    // Use regex-like replacement for -Xmx and -Xms parameters
+    // Use regex-like replacement for -Xmx parameters
     // Match patterns like -Xmx1024M, -Xmx2048M, etc.
     let xmx_pattern = regex::Regex::new(r"-Xmx\d+M").ok();
-    let xms_pattern = regex::Regex::new(r"-Xms\d+M").ok();
 
     if let Some(re) = xmx_pattern {
         // Only replace if the current value doesn't match
@@ -295,8 +302,13 @@ pub async fn create_container(
 
     tracing::info!("Total port bindings: {:?}", port_bindings);
 
+    // server_memory is for JVM heap, memory_limit is for Docker container
+    // If server_memory is not provided, use memory_limit for backward compatibility
+    let server_memory = req.server_memory.unwrap_or(req.memory_limit);
+
     let resources = crate::models::ContainerResources {
         memory_limit: req.memory_limit,
+        server_memory,
         cpu_limit: req.cpu_limit,
         disk_limit: req.disk_limit,
         swap_limit: req.swap_limit,
@@ -318,6 +330,10 @@ pub async fn create_container(
     // Check if there's an install script - if so, mark as not installed
     let has_install_script = req.install_script.is_some();
 
+    // Merge environment with SERVER_MEMORY set from server_memory
+    let mut environment = req.environment.clone();
+    environment.insert("SERVER_MEMORY".to_string(), server_memory.to_string());
+
     let managed = ManagedContainer {
         name: req.name.clone(),
         docker_id: docker_id.clone(),
@@ -329,7 +345,7 @@ pub async fn create_container(
         resources: resources.clone(),
         install_script: req.install_script.clone(),
         installed: !has_install_script, // If no install script, consider it installed
-        environment: req.environment.clone(),
+        environment,
     };
 
     // Insert into state - guard dropped immediately
@@ -414,8 +430,11 @@ pub async fn update_container(
     // Update resources if provided
     if let Some(memory) = req.memory_limit {
         container.resources.memory_limit = memory;
-        // Also update SERVER_MEMORY in environment so startup script uses new value
-        container.environment.insert("SERVER_MEMORY".to_string(), memory.to_string());
+    }
+    if let Some(server_memory) = req.server_memory {
+        container.resources.server_memory = server_memory;
+        // Update SERVER_MEMORY in environment so startup script uses new value
+        container.environment.insert("SERVER_MEMORY".to_string(), server_memory.to_string());
     }
     if let Some(cpu) = req.cpu_limit {
         container.resources.cpu_limit = cpu;

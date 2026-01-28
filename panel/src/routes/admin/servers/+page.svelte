@@ -24,7 +24,8 @@
         allocationId: '',
         userId: '',
         // Resource limits
-        memoryLimit: 1024,
+        memoryLimit: 1280,
+        serverMemory: 1024,
         cpuLimit: 1,
         diskLimit: 10240,
         swapLimit: 512,
@@ -69,7 +70,8 @@
 
     function applyPreset(preset: typeof presets[0]) {
         newServer.image = preset.image;
-        newServer.memoryLimit = preset.memory;
+        newServer.serverMemory = preset.memory;
+        newServer.memoryLimit = Math.round(preset.memory * 1.25); // 25% overhead for container
         newServer.cpuLimit = preset.cpu;
         newServer.diskLimit = preset.disk;
     }
@@ -86,6 +88,7 @@
                 allocationId: newServer.allocationId || undefined,
                 userId: newServer.userId || undefined,
                 memoryLimit: newServer.memoryLimit,
+                serverMemory: newServer.serverMemory,
                 cpuLimit: newServer.cpuLimit,
                 diskLimit: newServer.diskLimit,
                 swapLimit: newServer.swapLimit,

@@ -56,6 +56,7 @@
 
     // Settings editing
     let editMemory: number = 0;
+    let editServerMemory: number = 0;
     let editCpu: number = 0;
     let editDisk: number = 0;
     let editSwap: number = 0;
@@ -77,6 +78,7 @@
     // Initialize edit values when container loads
     $: if (container) {
         if (editMemory === 0) editMemory = container.memoryLimit || 1024;
+        if (editServerMemory === 0) editServerMemory = (container as any).serverMemory || container.memoryLimit || 1024;
         if (editCpu === 0) editCpu = container.cpuLimit || 1;
         if (editDisk === 0) editDisk = container.diskLimit || 5120;
         if (editSwap === 0) editSwap = container.swapLimit || 0;
@@ -355,6 +357,7 @@
         try {
             await api.updateContainer(containerId, {
                 memoryLimit: editMemory,
+                serverMemory: editServerMemory,
                 cpuLimit: editCpu,
                 diskLimit: editDisk,
                 swapLimit: editSwap,
@@ -874,8 +877,14 @@
                             <form on:submit|preventDefault={saveSettings} class="space-y-4">
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label class="text-dark-400 text-sm block mb-1">Memory (MB)</label>
-                                        <input type="number" bind:value={editMemory} min="128" class="input w-full" placeholder="e.g., 1024" />
+                                        <label class="text-dark-400 text-sm block mb-1">Server Memory (MB)</label>
+                                        <input type="number" bind:value={editServerMemory} min="128" class="input w-full" placeholder="e.g., 1024" />
+                                        <p class="text-dark-500 text-xs mt-1">JVM heap memory (-Xmx)</p>
+                                    </div>
+                                    <div>
+                                        <label class="text-dark-400 text-sm block mb-1">Container Memory (MB)</label>
+                                        <input type="number" bind:value={editMemory} min="128" class="input w-full" placeholder="e.g., 1280" />
+                                        <p class="text-dark-500 text-xs mt-1">Docker limit (should be ~20% higher)</p>
                                     </div>
                                     <div>
                                         <label class="text-dark-400 text-sm block mb-1">CPU Limit (cores)</label>

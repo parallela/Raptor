@@ -313,8 +313,12 @@ pub struct CreateContainerRequest {
     /// Additional allocation IDs (is_primary=false)
     #[serde(default)]
     pub additional_allocations: Vec<Uuid>,
+    /// Docker container memory limit in MB (should be higher than server_memory for JVM overhead)
     #[serde(default = "default_memory")]
     pub memory_limit: i64,
+    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
+    /// If not set, defaults to memory_limit for backward compatibility
+    pub server_memory: Option<i64>,
     #[serde(default = "default_cpu")]
     pub cpu_limit: f64,
     #[serde(default = "default_disk")]
