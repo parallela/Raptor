@@ -25,7 +25,6 @@ pub struct FtpCredentialsStore {
 pub struct RaptorUser {
     pub username: String,
     pub home_path: PathBuf,
-    pub is_admin: bool,
 }
 
 impl UserDetail for RaptorUser {
@@ -318,12 +317,11 @@ impl Authenticator<RaptorUser> for RaptorAuthenticator {
 
         // Use bcrypt verification
         if let Some(user) = self.state.verify_user(username, password) {
-            tracing::info!("FTP auth success for user: {} (admin: {}, home: {:?})",
-                username, user.is_admin, user.home_path);
+            tracing::info!("FTP auth success for user: {} (home: {:?})",
+                username, user.home_path);
             return Ok(RaptorUser {
                 username: user.username,
                 home_path: user.home_path,
-                is_admin: user.is_admin,
             });
         }
 
