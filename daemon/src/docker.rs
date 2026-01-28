@@ -69,9 +69,11 @@ impl DockerManager {
         let cpu_period = 100000i64;
         let cpu_quota = (resources.cpu_limit * cpu_period as f64) as i64;
 
-        // Restart policy: always restart on failure (no retry limit)
+        // Restart policy: always restart unless explicitly stopped via Docker API
+        // This means typing "stop" in the game console will restart the server
+        // But calling our stop API (which uses docker stop) will actually stop it
         let restart_policy = bollard::service::RestartPolicy {
-            name: Some(bollard::service::RestartPolicyNameEnum::ON_FAILURE),
+            name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
             maximum_retry_count: None,
         };
 

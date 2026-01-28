@@ -470,8 +470,33 @@ pub async fn start_container(
 
         tracing::info!("Port bindings: {:?}", port_bindings);
 
-        // Clean up ALL old containers with this name (stops and removes them)
-        // This prevents Docker from accumulating stopped containers
+        // First, gracefully stop the container if it's running (send stop command and wait)
+        // This allows the server to save and show shutdown logs
+        if let Some(stop_cmd) = &container.stop_command {
+            tracing::info!("Sending graceful stop command '{}' before recreating", stop_cmd);
+            // Send stop command - ignore errors (container might not be running)
+            let _ = state.docker.send_command(&container.docker_id, stop_cmd).await;
+
+            // Wait for the container to stop gracefully (up to 30 seconds)
+            for _ in 0..60 {
+                match state.docker.get_container(&container.docker_id).await {
+                    Ok(info) => {
+                        let container_state = info.state.to_lowercase();
+                        if container_state != "running" {
+                            tracing::info!("Container stopped gracefully");
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        // Container doesn't exist, that's fine
+                        break;
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+        }
+
+        // Clean up ALL old containers with this name (force remove now that it's stopped)
         if let Err(e) = state.docker.cleanup_containers_by_name(&container.name).await {
             tracing::warn!("Failed to cleanup old containers: {}", e);
         }
@@ -629,8 +654,28 @@ pub async fn recreate_container(
 
     tracing::info!("Total port bindings: {:?}", port_bindings);
 
-    // Clean up ALL old containers with this name (stops and removes them)
-    // This prevents Docker from accumulating stopped containers
+    // First, gracefully stop the container if it's running (send stop command and wait)
+    if let Some(stop_cmd) = &container.stop_command {
+        tracing::info!("Sending graceful stop command '{}' before recreating", stop_cmd);
+        let _ = state.docker.send_command(&container.docker_id, stop_cmd).await;
+
+        // Wait for the container to stop gracefully (up to 30 seconds)
+        for _ in 0..60 {
+            match state.docker.get_container(&container.docker_id).await {
+                Ok(info) => {
+                    let container_state = info.state.to_lowercase();
+                    if container_state != "running" {
+                        tracing::info!("Container stopped gracefully");
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    // Clean up ALL old containers with this name (force remove now that it's stopped)
     if let Err(e) = state.docker.cleanup_containers_by_name(&container.name).await {
         tracing::warn!("Failed to cleanup old containers: {}", e);
     }
