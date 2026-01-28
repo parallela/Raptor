@@ -64,6 +64,11 @@ impl DockerManager {
         });
         let cmd: Option<Vec<&str>> = cmd_strings.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
 
+        // Set STARTUP env var for the entrypoint.sh to use
+        let env_vars: Option<Vec<String>> = startup_script.map(|s| {
+            vec![format!("STARTUP={}", s)]
+        });
+
         let memory_bytes = resources.memory_limit * 1024 * 1024;
         let swap_bytes = resources.swap_limit * 1024 * 1024;
         let cpu_period = 100000i64;
@@ -111,6 +116,7 @@ impl DockerManager {
         let config = Config {
             image: Some(image),
             cmd,
+            env: env_vars.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
             exposed_ports: if exposed_port_keys.is_empty() {

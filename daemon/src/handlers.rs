@@ -165,6 +165,46 @@ fn mark_container_installed(state: &AppState, name: &str) {
     // Guard is dropped here
 }
 
+/// Replace {{VAR}} placeholders in a startup script with actual values from environment and resources
+/// Also handles backward compatibility: if SERVER_MEMORY was already replaced with a hardcoded value,
+/// it will update -Xmx and -Xms parameters to use the current memory_limit
+fn replace_startup_placeholders(
+    script: &str,
+    environment: &std::collections::HashMap<String, String>,
+    resources: &crate::models::ContainerResources,
+) -> String {
+    let mut result = script.to_string();
+
+    // Replace from environment variables
+    for (key, value) in environment {
+        result = result.replace(&format!("{{{{{}}}}}", key), value);
+    }
+
+    // Replace {{SERVER_MEMORY}} with actual memory_limit from resources
+    result = result.replace("{{SERVER_MEMORY}}", &resources.memory_limit.to_string());
+
+    // Backward compatibility: If -Xmx is hardcoded with a different value, update it
+    // This handles old containers where {{SERVER_MEMORY}} was already replaced
+    let memory_str = resources.memory_limit.to_string();
+
+    // Use regex-like replacement for -Xmx and -Xms parameters
+    // Match patterns like -Xmx1024M, -Xmx2048M, etc.
+    let xmx_pattern = regex::Regex::new(r"-Xmx\d+M").ok();
+    let xms_pattern = regex::Regex::new(r"-Xms\d+M").ok();
+
+    if let Some(re) = xmx_pattern {
+        // Only replace if the current value doesn't match
+        if !result.contains(&format!("-Xmx{}M", memory_str)) {
+            result = re.replace(&result, format!("-Xmx{}M", memory_str).as_str()).to_string();
+        }
+    }
+
+    // For -Xms, we typically want it to be a smaller value (e.g., 128M), so don't auto-replace
+    // unless it's set to {{SERVER_MEMORY}} pattern
+
+    result
+}
+
 // ============================================================================
 // AUTHENTICATION
 // ============================================================================
@@ -374,6 +414,8 @@ pub async fn update_container(
     // Update resources if provided
     if let Some(memory) = req.memory_limit {
         container.resources.memory_limit = memory;
+        // Also update SERVER_MEMORY in environment so startup script uses new value
+        container.environment.insert("SERVER_MEMORY".to_string(), memory.to_string());
     }
     if let Some(cpu) = req.cpu_limit {
         container.resources.cpu_limit = cpu;
@@ -502,13 +544,23 @@ pub async fn start_container(
             tracing::warn!("Failed to cleanup old containers: {}", e);
         }
 
+        // Replace {{VAR}} placeholders in startup script with actual values
+        let startup_script = container.startup_script.as_ref().map(|s| {
+            let replaced = replace_startup_placeholders(s, &container.environment, &container.resources);
+            tracing::info!("Original startup script: {}", s);
+            tracing::info!("Memory limit from resources: {}", container.resources.memory_limit);
+            tracing::info!("SERVER_MEMORY from env: {:?}", container.environment.get("SERVER_MEMORY"));
+            tracing::info!("Replaced startup script: {}", replaced);
+            replaced
+        });
+
         // Create new container with port bindings
         let docker_id = state
             .docker
             .create_container_with_resources(
                 &container.name,
                 &container.image,
-                container.startup_script.as_deref(),
+                startup_script.as_deref(),
                 if port_bindings.is_empty() { None } else { Some(port_bindings) },
                 &container.resources,
             )

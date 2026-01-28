@@ -143,19 +143,16 @@ pub async fn create_container(
             env_vars.insert(var.env_variable.clone(), value);
         }
 
-        // Add SERVER_MEMORY from memory_limit if not set
-        env_vars.entry("SERVER_MEMORY".to_string())
-            .or_insert_with(|| req.memory_limit.to_string());
+        // Always set SERVER_MEMORY from the actual memory_limit (overrides flake default)
+        env_vars.insert("SERVER_MEMORY".to_string(), req.memory_limit.to_string());
 
         // Use user-provided startup_script if present, otherwise use flake's
-        let startup_base = req.startup_script.clone()
+        // NOTE: We send the startup script with {{VAR}} placeholders intact.
+        // The daemon will replace them at container start time using the current environment values.
+        // This allows updating memory/variables without recreating the container.
+        let startup = req.startup_script.clone()
             .unwrap_or_else(|| flake.startup_command.clone());
 
-        // Replace {{VAR}} placeholders in startup command
-        let mut startup = startup_base;
-        for (key, value) in &env_vars {
-            startup = startup.replace(&format!("{{{{{}}}}}", key), value);
-        }
 
         (
             flake.docker_image,
