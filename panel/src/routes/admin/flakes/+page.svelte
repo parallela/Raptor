@@ -79,7 +79,7 @@
     async function loadFlakes() {
         loading = true;
         try {
-            flakes = await api.request<Flake[]>('/flakes');
+            flakes = await api.listFlakes();
         } catch (e: any) {
             toast.error(e.message || 'Failed to load flakes');
         } finally {
@@ -89,7 +89,7 @@
 
     async function viewFlake(id: string) {
         try {
-            selectedFlake = await api.request<FlakeWithVariables>(`/flakes/${id}`);
+            selectedFlake = await api.getFlake(id);
             showDetailsModal = true;
         } catch (e: any) {
             toast.error(e.message || 'Failed to load flake');
@@ -98,20 +98,17 @@
 
     async function createFlake() {
         try {
-            await api.request<FlakeWithVariables>('/flakes', {
-                method: 'POST',
-                body: JSON.stringify({
-                    name: newFlake.name,
-                    slug: newFlake.slug || newFlake.name.toLowerCase().replace(/\s+/g, '-'),
-                    author: newFlake.author || null,
-                    description: newFlake.description || null,
-                    dockerImage: newFlake.dockerImage,
-                    startupCommand: newFlake.startupCommand,
-                    startupDetection: newFlake.startupDetection || null,
-                    installScript: newFlake.installScript || null,
-                    configFiles: {},
-                    variables: newFlake.variables
-                })
+            await api.createFlake({
+                name: newFlake.name,
+                slug: newFlake.slug || newFlake.name.toLowerCase().replace(/\s+/g, '-'),
+                author: newFlake.author || null,
+                description: newFlake.description || null,
+                dockerImage: newFlake.dockerImage,
+                startupCommand: newFlake.startupCommand,
+                startupDetection: newFlake.startupDetection || null,
+                installScript: newFlake.installScript || null,
+                configFiles: {},
+                variables: newFlake.variables
             });
             toast.success('Flake created');
             showCreateModal = false;
@@ -126,10 +123,7 @@
         importing = true;
         try {
             const eggJson = JSON.parse(importJson);
-            await api.request<FlakeWithVariables>('/flakes/import', {
-                method: 'POST',
-                body: JSON.stringify({ eggJson })
-            });
+            await api.importFlake(eggJson);
             toast.success('Flake imported successfully');
             showImportModal = false;
             importJson = '';
@@ -144,7 +138,7 @@
     async function deleteFlake(id: string) {
         if (!confirm('Are you sure you want to delete this flake?')) return;
         try {
-            await api.request(`/flakes/${id}`, { method: 'DELETE' });
+            await api.deleteFlake(id);
             toast.success('Flake deleted');
             await loadFlakes();
         } catch (e: any) {
@@ -154,7 +148,7 @@
 
     async function exportFlake(id: string) {
         try {
-            const egg = await api.request(`/flakes/${id}/export`);
+            const egg = await api.exportFlake(id);
             const blob = new Blob([JSON.stringify(egg, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
