@@ -704,8 +704,3 @@ pub fn create_admin_ftp_access(
     }
 }
 
-// Re-export for backwards compatibility
-pub use FtpServerState as SftpServerState;
-pub use start_ftp_server as start_sftp_server;
-pub use FtpCredentials as SftpCredentials;
-pub use create_ftp_access as create_sftp_access;

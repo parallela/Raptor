@@ -468,6 +468,24 @@ pub async fn stop_container(
     if !verify_api_key(&headers, &state) {
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
+
+    // Get managed container state to use graceful stop with stop_command
+    if let Some(container) = state.containers.get(&id) {
+        let container = container.clone();
+
+        // Use graceful stop with the container's stop_command
+        let stop_cmd = container.stop_command.as_deref().unwrap_or("stop");
+        tracing::info!("Stopping container {} with graceful stop command: {}", id, stop_cmd);
+
+        state.docker
+            .graceful_stop(&container.docker_id, Some(stop_cmd), 30)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        return Ok(Json(serde_json::json!({ "success": true, "method": "graceful" })));
+    }
+
+    // Fallback to simple stop if no managed state
     container_action(&state, &id, "stop").await
 }
 
@@ -479,6 +497,25 @@ pub async fn restart_container(
     if !verify_api_key(&headers, &state) {
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
+
+    // Get managed container state to recreate with proper allocations
+    if let Some(container) = state.containers.get(&id) {
+        let container = container.clone();
+
+        tracing::info!("Restarting container {} by recreating with allocations", id);
+
+        // Stop the container first using graceful stop if possible
+        if let Some(stop_cmd) = &container.stop_command {
+            let _ = state.docker.graceful_stop(&container.docker_id, Some(stop_cmd), 15).await;
+        } else {
+            let _ = state.docker.stop_container(&container.docker_id).await;
+        }
+
+        // Recreate with allocations
+        return recreate_container_with_allocations(&state, &container).await;
+    }
+
+    // Fallback to simple restart if no managed state
     container_action(&state, &id, "restart").await
 }
 

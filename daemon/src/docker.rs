@@ -32,15 +32,6 @@ impl DockerManager {
         Ok(Self { docker })
     }
 
-    pub async fn create_container(
-        &self,
-        name: &str,
-        image: &str,
-        startup_script: Option<&str>,
-        port_bindings: Option<HashMap<String, Vec<bollard::service::PortBinding>>>,
-    ) -> anyhow::Result<String> {
-        self.create_container_with_resources(name, image, startup_script, port_bindings, &ContainerResources::default()).await
-    }
 
     pub async fn create_container_with_resources(
         &self,
@@ -109,17 +100,22 @@ impl DockerManager {
             ..Default::default()
         };
 
-        // Build exposed_ports from port_bindings keys
-        let exposed_ports: Option<HashMap<String, HashMap<(), ()>>> = port_bindings.as_ref().map(|pb| {
-            pb.keys().map(|k| (k.clone(), HashMap::new())).collect()
-        });
+        // Build exposed_ports from port_bindings keys - store as Vec to own the strings
+        let exposed_port_keys: Vec<String> = port_bindings
+            .as_ref()
+            .map(|pb| pb.keys().cloned().collect())
+            .unwrap_or_default();
 
         let config = Config {
             image: Some(image),
             cmd,
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
-            exposed_ports,
+            exposed_ports: if exposed_port_keys.is_empty() {
+                None
+            } else {
+                Some(exposed_port_keys.iter().map(|k| (k.as_str(), HashMap::new())).collect())
+            },
             // Interactive mode WITHOUT TTY - this allows:
             // 1. docker logs to work normally (no TTY escape sequences/prompts)
             // 2. stdin commands to still work via docker attach
