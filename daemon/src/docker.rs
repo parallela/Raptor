@@ -338,33 +338,6 @@ impl DockerManager {
         })
     }
 
-    pub async fn get_container_logs(&self, id: &str) -> anyhow::Result<Vec<String>> {
-        let options = LogsOptions::<String> {
-            stdout: true,
-            stderr: true,
-            tail: "10".to_string(),
-            ..Default::default()
-        };
-
-        let mut stream = self.docker.logs(id, Some(options));
-        let mut logs = Vec::new();
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(log) => {
-                    let text = match log {
-                        LogOutput::StdOut { message } => String::from_utf8_lossy(&message).to_string(),
-                        LogOutput::StdErr { message } => String::from_utf8_lossy(&message).to_string(),
-                        _ => continue,
-                    };
-                    logs.push(text);
-                }
-                Err(e) => return Err(anyhow::anyhow!("Log error: {}", e)),
-            }
-        }
-
-        Ok(logs)
-    }
 
     pub fn stream_logs(&self, id: &str, tx: broadcast::Sender<String>) {
         let docker = self.docker.clone();
