@@ -40,6 +40,7 @@ daemon/volumes
 daemon/data
 daemon/ftp_credentials.json
 daemon/containers.json
+daemon/sys
 
 # Panel static/generated
 panel/static/uploads/

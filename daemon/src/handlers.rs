@@ -199,10 +199,7 @@ pub async fn create_container(
         stop_command: req.stop_command,
         allocation: req.allocation,
         allocations: req.allocations,
-        ports: req.ports,
         resources,
-        sftp_user: None,
-        sftp_pass: None,
     };
 
     state.containers.insert(req.name.clone(), managed.clone());
@@ -302,15 +299,11 @@ pub async fn update_container(
         container.allocation = Some(alloc);
     }
 
-    // Update allocations array if provided (new model)
+    // Update allocations array if provided
     if let Some(allocations) = req.allocations {
         container.allocations = allocations;
     }
 
-    // Update ports if provided
-    if let Some(ports) = req.ports {
-        container.ports = ports;
-    }
 
     // Try to update Docker container resources (only works on running containers)
     if let Err(e) = state.docker.update_container_resources(
@@ -412,17 +405,6 @@ async fn recreate_container_with_allocations(
         }
     }
 
-    // Add any other port mappings
-    for port in &container.ports {
-        let key = format!("{}/{}", port.container_port, port.protocol);
-        port_bindings.insert(
-            key,
-            vec![PortBinding {
-                host_ip: Some("0.0.0.0".to_string()),
-                host_port: Some(port.host_port.to_string()),
-            }],
-        );
-    }
 
     tracing::info!("Recreating container with port bindings: {:?}", port_bindings.keys().collect::<Vec<_>>());
 
@@ -643,13 +625,9 @@ pub async fn create_ftp(
     }
 
     // Create FTP access with the provided password
+    // Credentials are stored in ftp_credentials.json keyed by container_id
     let creds = create_ftp_access(&state.ftp_state, &id, &req.password);
 
-    // Update container with FTP info
-    if let Some(mut container) = state.containers.get_mut(&id) {
-        container.sftp_user = Some(creds.user.clone());
-        container.sftp_pass = Some(creds.pass.clone());
-    }
 
     Ok(Json(creds))
 }

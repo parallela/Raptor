@@ -21,15 +21,13 @@ pub struct ManagedContainer {
     pub startup_script: Option<String>,
     /// Command to execute for graceful stop (e.g., "stop" for Minecraft)
     pub stop_command: Option<String>,
-    /// Legacy single allocation (kept for backward compatibility)
+    /// Legacy single allocation (kept for backward compatibility during migration)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub allocation: Option<AllocationInfo>,
-    /// Multiple allocations support
+    /// Container allocations (port bindings)
     #[serde(default)]
     pub allocations: Vec<ContainerAllocation>,
-    pub ports: Vec<PortMapping>,
     pub resources: ContainerResources,
-    pub sftp_user: Option<String>,
-    pub sftp_pass: Option<String>,
 }
 
 /// Container allocation with full details

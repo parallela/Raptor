@@ -1,23 +1,24 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
+use std::collections::HashMap;
 use async_trait::async_trait;
 use libunftp::auth::{AuthenticationError, Authenticator, Credentials, UserDetail};
 use libunftp::storage::{StorageBackend, Fileinfo, Metadata, Result as StorageResult, Error as StorageError, ErrorKind as StorageErrorKind};
 use tokio::io::AsyncSeekExt;
 
-/// Stored FTP credentials (for persistence) - password is bcrypt hashed
+/// Stored FTP credentials for a container - password is bcrypt hashed
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StoredFtpCredentials {
     pub username: String,
     pub password_hash: String,
-    pub container_id: String,
 }
 
-/// All FTP credentials stored in a single file
+/// All FTP credentials stored in a single file - keyed by container_id for O(1) lookup
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct FtpCredentialsStore {
-    pub credentials: Vec<StoredFtpCredentials>,
+    /// Map of container_id -> credentials
+    pub credentials: HashMap<String, StoredFtpCredentials>,
 }
 
 /// Custom user type that includes home directory info
@@ -90,8 +91,8 @@ impl FtpServerState {
                 match serde_json::from_str::<FtpCredentialsStore>(&contents) {
                     Ok(store) => {
                         let mut loaded = 0;
-                        for creds in store.credentials {
-                            self.add_user_from_stored(&creds);
+                        for (container_id, creds) in store.credentials {
+                            self.add_user_from_stored(&container_id, &creds);
                             loaded += 1;
                         }
                         tracing::info!("Loaded FTP credentials for {} containers from {:?}", loaded, creds_path);
@@ -108,8 +109,8 @@ impl FtpServerState {
     }
 
     /// Add user from stored credentials (password is already hashed)
-    fn add_user_from_stored(&self, creds: &StoredFtpCredentials) {
-        let home_path = self.base_path.join("volumes").join(&creds.container_id);
+    fn add_user_from_stored(&self, container_id: &str, creds: &StoredFtpCredentials) {
+        let home_path = self.base_path.join("volumes").join(container_id);
 
         // Create the home directory if it doesn't exist
         if let Err(e) = std::fs::create_dir_all(&home_path) {
@@ -121,29 +122,32 @@ impl FtpServerState {
             FtpUser {
                 username: creds.username.clone(),
                 password_hash: creds.password_hash.clone(),
-                container_id: creds.container_id.clone(),
+                container_id: container_id.to_string(),
                 home_path,
                 is_admin: false,
             },
         );
 
-        tracing::debug!("Loaded FTP user: {} for container: {}", creds.username, creds.container_id);
+        tracing::debug!("Loaded FTP user: {} for container: {}", creds.username, container_id);
     }
 
-    /// Save all FTP credentials to secure storage
+    /// Save all FTP credentials to secure storage (HashMap keyed by container_id)
     fn save_all_credentials(&self) {
         let creds_path = get_ftp_credentials_path();
 
-        // Collect all non-admin users
-        let credentials: Vec<StoredFtpCredentials> = self.users
-            .iter()
-            .filter(|u| !u.is_admin)
-            .map(|u| StoredFtpCredentials {
-                username: u.username.clone(),
-                password_hash: u.password_hash.clone(),
-                container_id: u.container_id.clone(),
-            })
-            .collect();
+        // Collect all users into HashMap keyed by container_id
+        let mut credentials: HashMap<String, StoredFtpCredentials> = HashMap::new();
+        for user in self.users.iter() {
+            if !user.is_admin {
+                credentials.insert(
+                    user.container_id.clone(),
+                    StoredFtpCredentials {
+                        username: user.username.clone(),
+                        password_hash: user.password_hash.clone(),
+                    },
+                );
+            }
+        }
 
         let store = FtpCredentialsStore { credentials };
 
