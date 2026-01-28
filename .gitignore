@@ -1,0 +1,61 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Rust
+target/
+Cargo.lock
+
+# Node
+node_modules/
+.svelte-kit/
+build/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Daemon data - stored in /var/lib/raptor-daemon/
+volumes/
+data/
+ftp_credentials.json
+containers.json
+daemon/volumes
+daemon/data
+daemon/ftp_credentials.json
+daemon/containers.json
+
+# Panel static/generated
+panel/static/uploads/
+panel/.svelte-kit/
+
+# Docker volumes
+postgres_data/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+

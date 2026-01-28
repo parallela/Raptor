@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: raptor-postgres
+    environment:
+      POSTGRES_USER: raptor
+      POSTGRES_PASSWORD: raptor_secret
+      POSTGRES_DB: raptor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raptor"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - raptor-network
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: raptor-api
+    env_file:
+      - ./api/.env
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - raptor-network
+
+  panel:
+    build:
+      context: .
+      dockerfile: panel/Dockerfile
+    container_name: raptor-panel
+    env_file:
+      - ./panel/.env
+    ports:
+      - "5173:3000"
+    depends_on:
+      - api
+    networks:
+      - raptor-network
+
+volumes:
+  postgres_data:
+
+networks:
+  raptor-network:
+    driver: bridge
