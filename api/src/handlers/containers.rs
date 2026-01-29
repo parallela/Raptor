@@ -3,12 +3,31 @@ use axum::{
     Extension,
     Json,
 };
+use base64::{Engine as _, engine::general_purpose};
 use chrono::Utc;
 use serde::Serialize;
 use uuid::Uuid;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use lazy_static::lazy_static;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{AppState, Claims, Container, ContainerPort, CreateContainerRequest, Daemon};
+
+// Storage for chunked uploads in progress
+struct ChunkUpload {
+    path: String,
+    _file_name: String,
+    file_size: u64,
+    total_chunks: u32,
+    chunks: HashMap<u32, Vec<u8>>,
+    created_at: std::time::Instant,
+}
+
+lazy_static! {
+    static ref CHUNK_STORAGE: Arc<Mutex<HashMap<String, ChunkUpload>>> = Arc::new(Mutex::new(HashMap::new()));
+}
 
 /// Create HTTP client for daemon communication
 /// Accepts self-signed certificates for internal daemon communication
@@ -1747,6 +1766,203 @@ pub async fn write_file(
         .map_err(|e| AppError::BadRequest(format!("Parse error: {}", e)))?;
 
     Ok(Json(result))
+}
+
+pub async fn upload_file(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+    mut multipart: axum::extract::Multipart,
+) -> AppResult<Json<serde_json::Value>> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if !can_access_container(&claims, &container) {
+        return Err(AppError::Unauthorized);
+    }
+
+    let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
+        .bind(container.daemon_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let mut path: Option<String> = None;
+    let mut file_content: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(format!("Multipart error: {}", e)))? {
+        let field_name = field.name().unwrap_or("").to_string();
+
+        if field_name == "path" {
+            path = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?);
+        } else if field_name == "file" {
+            file_content = Some(field.bytes().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.to_vec());
+        }
+    }
+
+    let path = path.ok_or_else(|| AppError::BadRequest("Missing 'path' field".to_string()))?;
+    let content = file_content.ok_or_else(|| AppError::BadRequest("Missing 'file' field".to_string()))?;
+
+    // Convert to base64 for transmission to daemon
+    let content_base64 = general_purpose::STANDARD.encode(&content);
+
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/files/write", daemon.base_url(), container.id);
+
+    // Send as base64 encoded content
+    let resp = client
+        .post(&url)
+        .header("X-API-Key", &daemon.api_key)
+        .json(&serde_json::json!({
+            "path": path,
+            "content": content_base64,
+            "encoding": "base64"
+        }))
+        .send()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Daemon error: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
+    }
+
+    Ok(Json(serde_json::json!({ "message": "File uploaded successfully" })))
+}
+
+
+pub async fn upload_file_chunk(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+    mut multipart: axum::extract::Multipart,
+) -> AppResult<Json<serde_json::Value>> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if !can_access_container(&claims, &container) {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Parse multipart form
+    let mut upload_id: Option<String> = None;
+    let mut chunk_index: Option<u32> = None;
+    let mut total_chunks: Option<u32> = None;
+    let mut path: Option<String> = None;
+    let mut file_name: Option<String> = None;
+    let mut file_size: Option<u64> = None;
+    let mut chunk_data: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(format!("Multipart error: {}", e)))? {
+        let field_name = field.name().unwrap_or("").to_string();
+
+        match field_name.as_str() {
+            "uploadId" => upload_id = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?),
+            "chunkIndex" => chunk_index = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.parse().map_err(|_| AppError::BadRequest("Invalid chunk index".to_string()))?),
+            "totalChunks" => total_chunks = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.parse().map_err(|_| AppError::BadRequest("Invalid total chunks".to_string()))?),
+            "path" => path = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?),
+            "fileName" => file_name = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?),
+            "fileSize" => file_size = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.parse().map_err(|_| AppError::BadRequest("Invalid file size".to_string()))?),
+            "chunk" => chunk_data = Some(field.bytes().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.to_vec()),
+            _ => {}
+        }
+    }
+
+    let upload_id = upload_id.ok_or_else(|| AppError::BadRequest("Missing uploadId".to_string()))?;
+    let chunk_index = chunk_index.ok_or_else(|| AppError::BadRequest("Missing chunkIndex".to_string()))?;
+    let total_chunks = total_chunks.ok_or_else(|| AppError::BadRequest("Missing totalChunks".to_string()))?;
+    let path = path.ok_or_else(|| AppError::BadRequest("Missing path".to_string()))?;
+    let file_name = file_name.ok_or_else(|| AppError::BadRequest("Missing fileName".to_string()))?;
+    let file_size = file_size.ok_or_else(|| AppError::BadRequest("Missing fileSize".to_string()))?;
+    let chunk_data = chunk_data.ok_or_else(|| AppError::BadRequest("Missing chunk data".to_string()))?;
+
+    let storage_key = format!("{}:{}", id, upload_id);
+
+    // Store the chunk
+    let mut storage = CHUNK_STORAGE.lock().await;
+
+    // Clean up old uploads (older than 30 minutes)
+    let now = std::time::Instant::now();
+    storage.retain(|_, upload| now.duration_since(upload.created_at).as_secs() < 1800);
+
+    let upload = storage.entry(storage_key.clone()).or_insert_with(|| ChunkUpload {
+        path: path.clone(),
+        _file_name: file_name.clone(),
+        file_size,
+        total_chunks,
+        chunks: HashMap::new(),
+        created_at: now,
+    });
+
+    upload.chunks.insert(chunk_index, chunk_data);
+
+    // Check if all chunks received
+    if upload.chunks.len() == total_chunks as usize {
+        // Assemble the file
+        let mut full_content = Vec::with_capacity(file_size as usize);
+        for i in 0..total_chunks {
+            if let Some(chunk) = upload.chunks.get(&i) {
+                full_content.extend_from_slice(chunk);
+            } else {
+                return Err(AppError::BadRequest(format!("Missing chunk {}", i)));
+            }
+        }
+
+        let file_path = upload.path.clone();
+
+        // Remove from storage
+        storage.remove(&storage_key);
+        drop(storage); // Release lock before network call
+
+        // Send to daemon
+        let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
+            .bind(container.daemon_id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+
+        let content_base64 = general_purpose::STANDARD.encode(&full_content);
+
+        let client = daemon_client();
+        let url = format!("{}/containers/{}/files/write", daemon.base_url(), container.id);
+
+        let resp = client
+            .post(&url)
+            .header("X-API-Key", &daemon.api_key)
+            .json(&serde_json::json!({
+                "path": file_path,
+                "content": content_base64,
+                "encoding": "base64"
+            }))
+            .send()
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Daemon error: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
+        }
+
+        return Ok(Json(serde_json::json!({
+            "message": "File uploaded successfully",
+            "complete": true
+        })));
+    }
+
+    Ok(Json(serde_json::json!({
+        "message": format!("Chunk {} of {} received", chunk_index + 1, total_chunks),
+        "complete": false,
+        "received": chunk_index + 1,
+        "total": total_chunks
+    })))
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]

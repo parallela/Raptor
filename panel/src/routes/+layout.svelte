@@ -31,13 +31,7 @@
     position="bottom-right"
     toastOptions={{
         duration: 4000,
-        style: 'background: #1e293b; color: #e2e8f0; border: 1px solid #334155;',
-        success: {
-            iconTheme: { primary: '#10b981', secondary: '#1e293b' }
-        },
-        error: {
-            iconTheme: { primary: '#ef4444', secondary: '#1e293b' }
-        }
+        style: 'background: #1e293b; color: #e2e8f0; border: 1px solid #334155;'
     }}
 />
 

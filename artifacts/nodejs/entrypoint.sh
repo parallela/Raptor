@@ -37,8 +37,11 @@ _term() {
     echo "[Raptor] Received shutdown signal, stopping server..."
     if [ -n "$child" ]; then
         kill -TERM "$child" 2>/dev/null
-        wait "$child"
+        wait "$child" 2>/dev/null
     fi
+    # Small delay to ensure Docker has processed the stop command
+    # before we exit, preventing race condition with restart policy
+    sleep 1
     exit 0
 }
 trap _term SIGTERM SIGINT
@@ -48,3 +51,8 @@ trap _term SIGTERM SIGINT
 eval $PARSED &
 child=$!
 wait "$child"
+exit_code=$?
+
+# If child exited on its own (not via signal), propagate exit code
+# This allows restart policy to work for crashes
+exit $exit_code

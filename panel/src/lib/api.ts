@@ -108,7 +108,16 @@ export const api = {
             body: JSON.stringify({ allocationId })
         }),
     getContainerAllocations: (id: string) => request<ContainerAllocation[]>(`/containers/${id}/allocations`),
-    getAvailableAllocations: (id: string) => request<Allocation[]>(`/containers/${id}/allocations/available`),
+    getAvailableAllocations: (daemonId: string) => request<Allocation[]>(`/containers/${daemonId}/allocations/available`),
+    addContainerAllocation: (containerId: string, allocationId: string) =>
+        request<{ message: string; allocationIp: string; allocationPort: number }>(`/containers/${containerId}/allocations`, {
+            method: 'POST',
+            body: JSON.stringify({ allocationId })
+        }),
+    removeContainerAllocation: (containerId: string, allocationId: string) =>
+        request<{ message: string }>(`/containers/${containerId}/allocations/${allocationId}`, { method: 'DELETE' }),
+    setContainerPrimaryAllocation: (containerId: string, allocationId: string) =>
+        request<{ message: string }>(`/containers/${containerId}/allocations/${allocationId}/primary`, { method: 'POST' }),
     addAllocation: (id: string, allocationId: string) =>
         request<{ message: string; allocationIp: string; allocationPort: number }>(`/containers/${id}/allocations`, {
             method: 'POST',
@@ -199,6 +208,101 @@ export const api = {
         request<{ message: string }>(`/containers/${containerId}/files/folder`, { method: 'POST', body: JSON.stringify({ path }) }),
     deleteFile: (containerId: string, path: string) =>
         request<{ message: string }>(`/containers/${containerId}/files/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+    uploadFile: async (containerId: string, path: string, file: File) => {
+        const t = get(token);
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('path', path);
+
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/containers/${containerId}/files/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${t}`
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Upload failed');
+        }
+        return response.json();
+    },
+
+    // Aliases for container file operations
+    listContainerFiles: (containerId: string, path: string = '/') =>
+        request<{ name: string; isDir: boolean; size: number; modified?: string }[]>(`/containers/${containerId}/files?path=${encodeURIComponent(path)}`),
+    getContainerFile: (containerId: string, path: string) =>
+        requestText(`/containers/${containerId}/files/read?path=${encodeURIComponent(path)}`),
+    saveContainerFile: (containerId: string, path: string, content: string) =>
+        request<{ message: string }>(`/containers/${containerId}/files/write`, { method: 'POST', body: JSON.stringify({ path, content }) }),
+    createContainerFolder: (containerId: string, path: string) =>
+        request<{ message: string }>(`/containers/${containerId}/files/folder`, { method: 'POST', body: JSON.stringify({ path }) }),
+    deleteContainerFile: (containerId: string, path: string) =>
+        request<{ message: string }>(`/containers/${containerId}/files/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+    uploadContainerFile: async (containerId: string, path: string, file: File, onProgress?: (progress: number) => void) => {
+        const t = get(token);
+        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        
+        // For files smaller than chunk size, use simple upload
+        if (file.size <= CHUNK_SIZE) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('path', path);
+
+            const response = await fetch(`${apiUrl}/containers/${containerId}/files/upload`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${t}`
+                },
+                body: formData
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || 'Upload failed');
+            }
+            onProgress?.(100);
+            return response.json();
+        }
+        
+        // For large files, use chunked upload
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const uploadId = crypto.randomUUID();
+        
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            const start = chunkIndex * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            const formData = new FormData();
+            formData.append('chunk', chunk);
+            formData.append('path', path);
+            formData.append('uploadId', uploadId);
+            formData.append('chunkIndex', chunkIndex.toString());
+            formData.append('totalChunks', totalChunks.toString());
+            formData.append('fileName', file.name);
+            formData.append('fileSize', file.size.toString());
+            
+            const response = await fetch(`${apiUrl}/containers/${containerId}/files/upload-chunk`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${t}`
+                },
+                body: formData
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || `Chunk ${chunkIndex + 1}/${totalChunks} upload failed`);
+            }
+            
+            onProgress?.(Math.round(((chunkIndex + 1) / totalChunks) * 100));
+        }
+        
+        return { message: 'Upload complete' };
+    },
 
     // Admin: All containers
     listAllContainers: () => request<Container[]>('/admin/containers'),
@@ -207,7 +311,7 @@ export const api = {
     listFlakes: () => request<import('./types').Flake[]>('/flakes'),
     getFlake: (id: string) => request<import('./types').FlakeWithVariables>(`/flakes/${id}`),
     createFlake: (data: any) => request<import('./types').FlakeWithVariables>('/flakes', { method: 'POST', body: JSON.stringify(data) }),
-    importFlake: (eggJson: any) => request<import('./types').FlakeWithVariables>('/flakes/import', { method: 'POST', body: JSON.stringify({ eggJson }) }),
+    importFlake: (flakeJson: any) => request<import('./types').FlakeWithVariables>('/flakes/import', { method: 'POST', body: JSON.stringify({ flakeJson }) }),
     deleteFlake: (id: string) => request<void>(`/flakes/${id}`, { method: 'DELETE' }),
     exportFlake: (id: string) => request<any>(`/flakes/${id}/export`),
 };

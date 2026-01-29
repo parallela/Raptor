@@ -5,6 +5,7 @@
   "description": "High performance Spigot fork that aims to fix gameplay and mechanics inconsistencies.",
   "dockerImage": "artifacts.lstan.eu/java:21",
   "startupCommand": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}",
+  "restartPolicy": "unless-stopped",
   "configFiles": {
     "server.properties": {
       "parser": "properties",

@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.7", features = ["ws", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,3 +30,7 @@ lettre = { version = "0.11", features = ["tokio1-native-tls", "builder", "smtp-t
 rand = "0.8"
 # Gravatar support
 md5 = "0.7"
+# Base64 encoding for file uploads
+base64 = "0.21"
+# Static storage for chunked uploads
+lazy_static = "1.4"

@@ -89,6 +89,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id/files", get(handlers::containers::list_files))
         .route("/containers/:id/files/read", get(handlers::containers::read_file))
         .route("/containers/:id/files/write", post(handlers::containers::write_file))
+        .route("/containers/:id/files/upload", post(handlers::containers::upload_file))
+        .route("/containers/:id/files/upload-chunk", post(handlers::containers::upload_file_chunk))
         .route("/containers/:id/files/folder", post(handlers::containers::create_folder))
         .route("/containers/:id/files/delete", delete(handlers::containers::delete_file))
         .route("/daemons", get(handlers::daemons::list_daemons))

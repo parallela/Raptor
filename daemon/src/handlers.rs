@@ -323,6 +323,7 @@ pub async fn create_container(
             req.startup_script.as_deref(),
             if port_bindings.is_empty() { None } else { Some(port_bindings) },
             &resources,
+            &req.restart_policy,
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -346,6 +347,7 @@ pub async fn create_container(
         install_script: req.install_script.clone(),
         installed: !has_install_script, // If no install script, consider it installed
         environment,
+        restart_policy: req.restart_policy.clone(),
     };
 
     // Insert into state - guard dropped immediately
@@ -582,6 +584,7 @@ pub async fn start_container(
                 startup_script.as_deref(),
                 if port_bindings.is_empty() { None } else { Some(port_bindings) },
                 &container.resources,
+                &container.restart_policy,
             )
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -746,6 +749,7 @@ pub async fn recreate_container(
             container.startup_script.as_deref(),
             if port_bindings.is_empty() { None } else { Some(port_bindings) },
             &container.resources,
+            &container.restart_policy,
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -1540,6 +1544,8 @@ pub async fn read_file(
 pub struct WriteFileRequest {
     pub path: String,
     pub content: String,
+    #[serde(default)]
+    pub encoding: Option<String>,
 }
 
 pub async fn write_file(
@@ -1572,12 +1578,25 @@ pub async fn write_file(
         }
     }
 
-    if let Err(e) = tokio::fs::write(&full_path, &req.content).await {
+    // Handle base64 encoding for binary files
+    let content_bytes = if req.encoding.as_deref() == Some("base64") {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(&req.content)
+            .map_err(|e| {
+                tracing::error!("write_file: failed to decode base64: {}", e);
+                StatusCode::BAD_REQUEST
+            })?
+    } else {
+        req.content.into_bytes()
+    };
+
+    if let Err(e) = tokio::fs::write(&full_path, &content_bytes).await {
         tracing::error!("write_file: failed to write file {:?}: {}", full_path, e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    tracing::info!("write_file: saved {} bytes to {:?}", req.content.len(), full_path);
+    tracing::info!("write_file: saved {} bytes to {:?}", content_bytes.len(), full_path);
     Ok(Json(serde_json::json!({"message": "File saved successfully"})))
 }
 

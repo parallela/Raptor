@@ -5,6 +5,7 @@
   "description": "The official Minecraft server from Mojang.",
   "dockerImage": "artifacts.lstan.eu/java:21",
   "startupCommand": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}} nogui",
+  "restartPolicy": "unless-stopped",
   "configFiles": {
     "server.properties": {
       "parser": "properties",

@@ -40,6 +40,7 @@ impl DockerManager {
         startup_script: Option<&str>,
         port_bindings: Option<HashMap<String, Vec<bollard::service::PortBinding>>>,
         resources: &ContainerResources,
+        restart_policy_name: &str,
     ) -> anyhow::Result<String> {
         let mut stream = self.docker.create_image(
             Some(CreateImageOptions {
@@ -69,13 +70,31 @@ impl DockerManager {
         let cpu_period = 100000i64;
         let cpu_quota = (resources.cpu_limit * cpu_period as f64) as i64;
 
-        // Restart policy: always restart unless explicitly stopped via Docker API
-        // This means typing "stop" in the game console will restart the server
-        // But calling our stop API (which uses docker stop) will actually stop it
-        let restart_policy = bollard::service::RestartPolicy {
-            name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
-            maximum_retry_count: None,
+        // Parse restart policy from string
+        // - "no": Never restart
+        // - "always": Always restart
+        // - "on-failure": Restart only on non-zero exit code (good for Node.js, etc.)
+        // - "unless-stopped": Restart unless explicitly stopped via Docker API (good for game servers)
+        let restart_policy = match restart_policy_name.to_lowercase().as_str() {
+            "no" | "none" => bollard::service::RestartPolicy {
+                name: Some(bollard::service::RestartPolicyNameEnum::NO),
+                maximum_retry_count: None,
+            },
+            "always" => bollard::service::RestartPolicy {
+                name: Some(bollard::service::RestartPolicyNameEnum::ALWAYS),
+                maximum_retry_count: None,
+            },
+            "on-failure" | "onfailure" => bollard::service::RestartPolicy {
+                name: Some(bollard::service::RestartPolicyNameEnum::ON_FAILURE),
+                maximum_retry_count: Some(5),
+            },
+            _ => bollard::service::RestartPolicy {
+                // Default to unless-stopped for backward compatibility with game servers
+                name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
+                maximum_retry_count: None,
+            },
         };
+        tracing::debug!("Using restart policy: {} for container {}", restart_policy_name, name);
 
         // Volume binding: mount {FTP_BASE_PATH}/volumes/{container_name} to /home/container
         let base_path = std::env::var("FTP_BASE_PATH")

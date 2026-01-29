@@ -25,8 +25,15 @@ pub struct Flake {
     pub install_entrypoint: Option<String>,
     pub features: serde_json::Value,
     pub file_denylist: serde_json::Value,
+    /// Docker restart policy: "no", "always", "on-failure", "unless-stopped"
+    #[serde(default = "default_restart_policy")]
+    pub restart_policy: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn default_restart_policy() -> String {
+    "unless-stopped".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -66,6 +73,9 @@ pub struct CreateFlakeRequest {
     pub config_files: serde_json::Value,
     pub startup_detection: Option<String>,
     pub install_script: Option<String>,
+    /// Docker restart policy: "no", "always", "on-failure", "unless-stopped"
+    #[serde(default = "default_restart_policy")]
+    pub restart_policy: String,
     #[serde(default)]
     pub variables: Vec<CreateVariableRequest>,
 }
@@ -97,7 +107,9 @@ fn default_true() -> bool {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFlakeRequest {
-    pub egg_json: serde_json::Value,
+    /// The flake JSON data (also supports Pterodactyl egg format for backward compatibility)
+    #[serde(alias = "eggJson")]
+    pub flake_json: serde_json::Value,
 }
 
 /// List all flakes
@@ -155,8 +167,8 @@ pub async fn create_flake(
     let flake_id = Uuid::new_v4();
 
     let flake: Flake = sqlx::query_as(
-        r#"INSERT INTO flakes (id, name, slug, author, description, docker_image, startup_command, config_files, startup_detection, install_script)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        r#"INSERT INTO flakes (id, name, slug, author, description, docker_image, startup_command, config_files, startup_detection, install_script, restart_policy)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *"#
     )
         .bind(flake_id)
@@ -169,6 +181,7 @@ pub async fn create_flake(
         .bind(&req.config_files)
         .bind(&req.startup_detection)
         .bind(&req.install_script)
+        .bind(&req.restart_policy)
         .fetch_one(&state.db)
         .await?;
 
@@ -215,7 +228,7 @@ pub async fn delete_flake(
     Ok(Json(serde_json::json!({ "message": "Flake deleted" })))
 }
 
-/// Import a Pterodactyl egg as a flake (admin only)
+/// Import a flake from JSON (also supports Pterodactyl egg format)
 pub async fn import_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -225,10 +238,10 @@ pub async fn import_flake(
         return Err(AppError::Unauthorized);
     }
 
-    let egg = &req.egg_json;
+    let flake_data = &req.flake_json;
 
-    let name = egg["name"].as_str().unwrap_or("Imported").to_string();
-    let base_slug = egg["slug"].as_str()
+    let name = flake_data["name"].as_str().unwrap_or("Imported").to_string();
+    let base_slug = flake_data["slug"].as_str()
         .map(|s| s.to_string())
         .unwrap_or_else(|| name.to_lowercase().replace(' ', "-").replace("(", "").replace(")", ""));
 
@@ -247,35 +260,35 @@ pub async fn import_flake(
         counter += 1;
     }
 
-    let author = egg["author"].as_str().map(|s| s.to_string());
-    let description = egg["description"].as_str().map(|s| s.to_string());
-    let startup_command = egg["startup"].as_str()
-        .or_else(|| egg["startupCommand"].as_str())
-        .or_else(|| egg["startup_command"].as_str())
+    let author = flake_data["author"].as_str().map(|s| s.to_string());
+    let description = flake_data["description"].as_str().map(|s| s.to_string());
+    let startup_command = flake_data["startup"].as_str()
+        .or_else(|| flake_data["startupCommand"].as_str())
+        .or_else(|| flake_data["startup_command"].as_str())
         .unwrap_or("").to_string();
 
     // Use provided dockerImage or default to our artifact
-    let docker_image = egg["dockerImage"].as_str()
-        .or_else(|| egg["docker_image"].as_str())
+    let docker_image = flake_data["dockerImage"].as_str()
+        .or_else(|| flake_data["docker_image"].as_str())
         .unwrap_or("artifacts.lstan.eu/java:21").to_string();
 
     let mut config_files = serde_json::json!({});
-    if let Some(config) = egg["config"]["files"].as_str() {
+    if let Some(config) = flake_data["config"]["files"].as_str() {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(config) {
             config_files = parsed;
         }
-    } else if let Some(config) = egg["configFiles"].as_object() {
+    } else if let Some(config) = flake_data["configFiles"].as_object() {
         config_files = serde_json::json!(config);
     }
 
-    let startup_detection = egg["config"]["startup"].as_str()
+    let startup_detection = flake_data["config"]["startup"].as_str()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
         .and_then(|v| v["done"].as_str().map(|s| s.to_string()))
-        .or_else(|| egg["startupDetection"].as_str().map(|s| s.to_string()));
+        .or_else(|| flake_data["startupDetection"].as_str().map(|s| s.to_string()));
 
-    let mut install_script = egg["scripts"]["installation"]["script"].as_str()
-        .or_else(|| egg["installScript"].as_str())
-        .or_else(|| egg["install_script"].as_str())
+    let mut install_script = flake_data["scripts"]["installation"]["script"].as_str()
+        .or_else(|| flake_data["installScript"].as_str())
+        .or_else(|| flake_data["install_script"].as_str())
         .map(|s| s.to_string());
     if let Some(ref mut script) = install_script {
         if !script.contains("eula=true") {
@@ -283,14 +296,31 @@ pub async fn import_flake(
         }
     }
 
+    // Get restart policy from flake data or default based on type
+    // Game servers (Java/Minecraft) should use "unless-stopped" so they restart when user types "stop"
+    // Node.js and other services should use "on-failure" so they don't restart on manual stop
+    let restart_policy = flake_data["restartPolicy"].as_str()
+        .or_else(|| flake_data["restart_policy"].as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            // Default based on docker image type
+            if docker_image.contains("java") || docker_image.contains("yolk") {
+                "unless-stopped".to_string()
+            } else if docker_image.contains("node") {
+                "on-failure".to_string()
+            } else {
+                "unless-stopped".to_string() // Default for game servers
+            }
+        });
+
     // Use a transaction to ensure atomicity
     let mut tx = state.db.begin().await?;
 
     let flake_id = Uuid::new_v4();
 
     let flake: Flake = sqlx::query_as(
-        r#"INSERT INTO flakes (id, name, slug, author, description, docker_image, startup_command, config_files, startup_detection, install_script)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        r#"INSERT INTO flakes (id, name, slug, author, description, docker_image, startup_command, config_files, startup_detection, install_script, restart_policy)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *"#
     )
         .bind(flake_id)
@@ -303,11 +333,12 @@ pub async fn import_flake(
         .bind(&config_files)
         .bind(&startup_detection)
         .bind(&install_script)
+        .bind(&restart_policy)
         .fetch_one(&mut *tx)
         .await?;
 
     let mut variables = Vec::new();
-    let vars_array = egg["variables"].as_array();
+    let vars_array = flake_data["variables"].as_array();
     if let Some(vars) = vars_array {
         // Track env variables to avoid duplicates within the same import
         let mut seen_env_vars = std::collections::HashSet::new();
@@ -350,7 +381,7 @@ pub async fn import_flake(
     Ok(Json(FlakeWithVariables { flake, variables }))
 }
 
-/// Export a flake as Pterodactyl egg format
+/// Export a flake as JSON (Pterodactyl-compatible format)
 pub async fn export_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -373,7 +404,7 @@ pub async fn export_flake(
         .fetch_all(&state.db)
         .await?;
 
-    let egg = serde_json::json!({
+    let export_data = serde_json::json!({
         "_comment": "Exported from Raptor Panel",
         "meta": { "version": "RAPTOR_v1" },
         "exported_at": chrono::Utc::now().to_rfc3339(),
@@ -396,5 +427,5 @@ pub async fn export_flake(
         })).collect::<Vec<_>>()
     });
 
-    Ok(Json(egg))
+    Ok(Json(export_data))
 }

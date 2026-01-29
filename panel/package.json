@@ -24,6 +24,8 @@
   },
   "dependencies": {
     "@sveltejs/adapter-node": "^2.0.0",
+    "lucide-svelte": "^0.303.0",
+    "monaco-editor": "^0.45.0",
     "svelte-french-toast": "^1.2.0"
   },
   "type": "module"

@@ -75,6 +75,15 @@ pub struct ManagedContainer {
     /// Environment variables for install/startup
     #[serde(default)]
     pub environment: std::collections::HashMap<String, String>,
+    /// Restart policy: "no", "always", "on-failure", "unless-stopped"
+    /// Default is "unless-stopped" for game servers (restarts when user types stop in console)
+    /// Use "no" or "on-failure" for services that shouldn't restart on manual stop
+    #[serde(default = "default_restart_policy")]
+    pub restart_policy: String,
+}
+
+fn default_restart_policy() -> String {
+    "unless-stopped".to_string()
 }
 
 /// Container allocation with full details
@@ -163,6 +172,9 @@ pub struct CreateContainerRequest {
     /// Environment variables for the container
     #[serde(default)]
     pub environment: std::collections::HashMap<String, String>,
+    /// Restart policy: "no", "always", "on-failure", "unless-stopped"
+    #[serde(default = "default_restart_policy")]
+    pub restart_policy: String,
 }
 
 fn default_memory() -> i64 { 512 }

@@ -5,6 +5,7 @@
   "description": "High performance Spigot fork using Pterodactyl Yolks Java image for testing.",
   "dockerImage": "ghcr.io/pterodactyl/yolks:java_21",
   "startupCommand": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}",
+  "restartPolicy": "unless-stopped",
   "configFiles": {
     "server.properties": {
       "parser": "properties",
