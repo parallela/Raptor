@@ -146,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
             .route_layer(axum_middleware::from_fn(require_permission("daemons.update"))))
         .route("/daemons/:id", delete(handlers::daemons::delete_daemon)
             .route_layer(axum_middleware::from_fn(require_permission("daemons.delete"))))
+        .route("/daemons/ping", post(handlers::daemons::ping_daemon))
         .route("/roles", post(handlers::roles::create_role)
             .route_layer(axum_middleware::from_fn(require_permission("roles.create"))))
         .route("/roles/:id", patch(handlers::roles::update_role)

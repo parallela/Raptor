@@ -10,6 +10,16 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::models::{AppState, Claims, Container, ContainerPort, CreateContainerRequest, Daemon};
 
+/// Create HTTP client for daemon communication
+/// Accepts self-signed certificates for internal daemon communication
+fn daemon_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// Allocation info for container responses
 #[derive(Debug, Serialize, Clone, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -119,7 +129,7 @@ pub async fn create_container(
         .ok_or(AppError::NotFound)?;
 
     // Load flake if provided
-    let (image, startup_script, flake_id, install_script, flake_variables) = if let Some(fid) = req.flake_id {
+    let (image, startup_script, flake_id, install_script, mut flake_variables) = if let Some(fid) = req.flake_id {
         let flake: crate::handlers::flakes::Flake = sqlx::query_as("SELECT * FROM flakes WHERE id = $1")
             .bind(fid)
             .fetch_optional(&state.db)
@@ -173,8 +183,8 @@ pub async fn create_container(
     let container_id = Uuid::new_v4();
     let container_name_for_docker = container_id.to_string();
 
-    let client = reqwest::Client::new();
-    let daemon_url = format!("http://{}:{}/containers", daemon.host, daemon.port);
+    let client = daemon_client();
+    let daemon_url = format!("{}/containers", daemon.base_url());
 
     let port_mappings: Vec<serde_json::Value> = req.ports.iter().map(|p| {
         serde_json::json!({
@@ -471,8 +481,8 @@ pub async fn delete_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
-    let daemon_url = format!("http://{}:{}/containers/{}", daemon.host, daemon.port, container.id);
+    let client = daemon_client();
+    let daemon_url = format!("{}/containers/{}", daemon.base_url(), container.id);
 
     client
         .delete(&daemon_url)
@@ -572,8 +582,8 @@ pub async fn update_container(
     }
 
     // Update daemon container resources
-    let client = reqwest::Client::new();
-    let daemon_url = format!("http://{}:{}/containers/{}", daemon.host, daemon.port, container.id);
+    let client = daemon_client();
+    let daemon_url = format!("{}/containers/{}", daemon.base_url(), container.id);
 
     let res = client
         .patch(&daemon_url)
@@ -676,10 +686,10 @@ async fn proxy_container_action(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
     let daemon_url = format!(
-        "http://{}:{}/containers/{}/{}",
-        daemon.host, daemon.port, container.id, action
+        "{}/containers/{}/{}",
+        daemon.base_url(), container.id, action
     );
 
     let res = client
@@ -745,6 +755,7 @@ pub async fn start_container(
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -762,7 +773,7 @@ pub async fn start_container(
             })
         }).collect();
 
-        let update_url = format!("http://{}:{}/containers/{}", daemon.host, daemon.port, container.id);
+        let update_url = format!("{}/containers/{}", daemon.base_url(), container.id);
         let update_res = client
             .patch(&update_url)
             .header("X-API-Key", &daemon.api_key)
@@ -778,7 +789,7 @@ pub async fn start_container(
     }
 
     // Now start the container
-    let start_url = format!("http://{}:{}/containers/{}/start", daemon.host, daemon.port, container.id);
+    let start_url = format!("{}/containers/{}/start", daemon.base_url(), container.id);
     let start_res = client
         .post(&start_url)
         .header("X-API-Key", &daemon.api_key)
@@ -828,13 +839,13 @@ pub async fn stop_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
 
     // Use the container's configured stop command (defaults to "stop")
     let stop_command = container.stop_command.unwrap_or_else(|| "stop".to_string());
 
     // First, attempt graceful stop by sending the stop command to stdin
-    let graceful_url = format!("http://{}:{}/containers/{}/graceful-stop", daemon.host, daemon.port, container.id);
+    let graceful_url = format!("{}/containers/{}/graceful-stop", daemon.base_url(), container.id);
     let graceful_res = client
         .post(&graceful_url)
         .header("X-API-Key", &daemon.api_key)
@@ -859,7 +870,7 @@ pub async fn stop_container(
             // Graceful stop failed or timed out, fallback to Docker stop
             tracing::warn!("Graceful stop failed for container {}, using Docker stop", id);
 
-            let docker_stop_url = format!("http://{}:{}/containers/{}/stop", daemon.host, daemon.port, container.id);
+            let docker_stop_url = format!("{}/containers/{}/stop", daemon.base_url(), container.id);
             let docker_res = client
                 .post(&docker_stop_url)
                 .header("X-API-Key", &daemon.api_key)
@@ -909,13 +920,13 @@ pub async fn restart_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
 
     // Use the container's configured stop command
     let stop_command = container.stop_command.clone().unwrap_or_else(|| "stop".to_string());
 
     // First, do graceful stop
-    let stop_url = format!("http://{}:{}/containers/{}/graceful-stop", daemon.host, daemon.port, container.id);
+    let stop_url = format!("{}/containers/{}/graceful-stop", daemon.base_url(), container.id);
     let stop_res = client
         .post(&stop_url)
         .header("X-API-Key", &daemon.api_key)
@@ -930,7 +941,7 @@ pub async fn restart_container(
     if !stop_res.status().is_success() {
         tracing::warn!("Graceful stop failed, trying force stop");
         // Fallback to force stop
-        let force_stop_url = format!("http://{}:{}/containers/{}/stop", daemon.host, daemon.port, container.id);
+        let force_stop_url = format!("{}/containers/{}/stop", daemon.base_url(), container.id);
         client
             .post(&force_stop_url)
             .header("X-API-Key", &daemon.api_key)
@@ -943,7 +954,7 @@ pub async fn restart_container(
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Then start
-    let start_url = format!("http://{}:{}/containers/{}/start", daemon.host, daemon.port, container.id);
+    let start_url = format!("{}/containers/{}/start", daemon.base_url(), container.id);
     let start_res = client
         .post(&start_url)
         .header("X-API-Key", &daemon.api_key)
@@ -1006,8 +1017,8 @@ pub async fn send_command(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
-    let url = format!("http://{}:{}/containers/{}/command", daemon.host, daemon.port, container.id);
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/command", daemon.base_url(), container.id);
 
     let res = client
         .post(&url)
@@ -1063,8 +1074,8 @@ pub async fn graceful_stop_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
-    let url = format!("http://{}:{}/containers/{}/graceful-stop", daemon.host, daemon.port, container.id);
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/graceful-stop", daemon.base_url(), container.id);
 
     let res = client
         .post(&url)
@@ -1443,8 +1454,8 @@ pub async fn set_sftp_password(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
-    let url = format!("http://{}:{}/containers/{}/ftp", daemon.host, daemon.port, container.id);
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/ftp", daemon.base_url(), container.id);
 
     let daemon_result = client
         .post(&url)
@@ -1617,10 +1628,10 @@ pub async fn list_files(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
     let path = query.path.unwrap_or_else(|| "/".to_string());
     // Use container ID (UUID) for volume path
-    let url = format!("http://{}:{}/containers/{}/files?path={}", daemon.host, daemon.port, container.id, path);
+    let url = format!("{}/containers/{}/files?path={}", daemon.base_url(), container.id, path);
 
     let resp = client
         .get(&url)
@@ -1668,9 +1679,9 @@ pub async fn read_file(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
     // Use container ID (UUID) for volume path
-    let url = format!("http://{}:{}/containers/{}/files/read?path={}", daemon.host, daemon.port, container.id, query.path);
+    let url = format!("{}/containers/{}/files/read?path={}", daemon.base_url(), container.id, query.path);
 
     let resp = client
         .get(&url)
@@ -1714,9 +1725,9 @@ pub async fn write_file(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
     // Use container ID (UUID) for volume path
-    let url = format!("http://{}:{}/containers/{}/files/write", daemon.host, daemon.port, container.id);
+    let url = format!("{}/containers/{}/files/write", daemon.base_url(), container.id);
 
     let resp = client
         .post(&url)
@@ -1725,6 +1736,12 @@ pub async fn write_file(
         .send()
         .await
         .map_err(|e| AppError::BadRequest(format!("Daemon error: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
+    }
 
     let result: serde_json::Value = resp.json().await
         .map_err(|e| AppError::BadRequest(format!("Parse error: {}", e)))?;
@@ -1760,9 +1777,9 @@ pub async fn create_folder(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
     // Use container ID (UUID) for volume path
-    let url = format!("http://{}:{}/containers/{}/files/folder", daemon.host, daemon.port, container.id);
+    let url = format!("{}/containers/{}/files/folder", daemon.base_url(), container.id);
 
     let resp = client
         .post(&url)
@@ -1771,6 +1788,12 @@ pub async fn create_folder(
         .send()
         .await
         .map_err(|e| AppError::BadRequest(format!("Daemon error: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
+    }
 
     let result: serde_json::Value = resp.json().await
         .map_err(|e| AppError::BadRequest(format!("Parse error: {}", e)))?;
@@ -1805,9 +1828,9 @@ pub async fn delete_file(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
+    let client = daemon_client();
     // Use container ID (UUID) for volume path
-    let url = format!("http://{}:{}/containers/{}/files/delete?path={}", daemon.host, daemon.port, container.id, query.path);
+    let url = format!("{}/containers/{}/files/delete?path={}", daemon.base_url(), container.id, query.path);
 
     let resp = client
         .delete(&url)
@@ -1815,6 +1838,12 @@ pub async fn delete_file(
         .send()
         .await
         .map_err(|e| AppError::BadRequest(format!("Daemon error: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
+    }
 
     let result: serde_json::Value = resp.json().await
         .map_err(|e| AppError::BadRequest(format!("Parse error: {}", e)))?;
@@ -1856,8 +1885,8 @@ pub async fn get_container_stats(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let client = reqwest::Client::new();
-    let url = format!("http://{}:{}/containers/{}/stats", daemon.host, daemon.port, container.id);
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/stats", daemon.base_url(), container.id);
 
     let resp = client
         .get(&url)

@@ -36,15 +36,72 @@
         name: '',
         host: '',
         port: 8080,
-        location: ''
+        location: '',
+        secure: false
     };
 
     let editDaemon = {
         name: '',
         host: '',
         port: 8080,
-        location: ''
+        location: '',
+        secure: false
     };
+
+    // Live daemon ping testing
+    let pingStatus: { testing: boolean; online: boolean | null; latencyMs: number | null; error: string | null } = {
+        testing: false,
+        online: null,
+        latencyMs: null,
+        error: null
+    };
+    let pingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    async function testDaemonConnection(host: string, port: number, secure: boolean) {
+        if (!host || !port) {
+            pingStatus = { testing: false, online: null, latencyMs: null, error: null };
+            return;
+        }
+
+        pingStatus = { testing: true, online: null, latencyMs: null, error: null };
+
+        try {
+            const result = await api.pingDaemon({
+                host,
+                port,
+                apiKey: 'test', // For testing, we just check if the daemon responds
+                secure
+            });
+
+            pingStatus = {
+                testing: false,
+                online: result.online,
+                latencyMs: result.latencyMs || null,
+                error: result.error || null
+            };
+        } catch (e: any) {
+            pingStatus = {
+                testing: false,
+                online: false,
+                latencyMs: null,
+                error: e.message || 'Connection failed'
+            };
+        }
+    }
+
+    function debouncedPingTest(host: string, port: number, secure: boolean) {
+        if (pingTimeout) clearTimeout(pingTimeout);
+        pingTimeout = setTimeout(() => testDaemonConnection(host, port, secure), 500);
+    }
+
+    // Watch for changes in host/port/secure for live testing
+    $: if (showCreate) {
+        debouncedPingTest(newDaemon.host, newDaemon.port, newDaemon.secure);
+    }
+
+    $: if (showEdit) {
+        debouncedPingTest(editDaemon.host, editDaemon.port, editDaemon.secure);
+    }
 
     onMount(async () => {
         if (!$user) {
@@ -155,10 +212,12 @@
                 name: newDaemon.name,
                 host: newDaemon.host,
                 port: newDaemon.port,
-                location: newDaemon.location || undefined
+                location: newDaemon.location || undefined,
+                secure: newDaemon.secure
             });
             showCreate = false;
-            newDaemon = { name: '', host: '', port: 8080, location: '' };
+            newDaemon = { name: '', host: '', port: 8080, location: '', secure: false };
+            pingStatus = { testing: false, online: null, latencyMs: null, error: null };
             await loadData();
             toast.success('Daemon created successfully');
         } catch (e: any) {
@@ -197,7 +256,8 @@
             name: daemon.name,
             host: daemon.host,
             port: daemon.port,
-            location: daemon.location || ''
+            location: daemon.location || '',
+            secure: daemon.secure || false
         };
         showEdit = true;
     }
@@ -205,6 +265,7 @@
     function closeEditModal() {
         showEdit = false;
         editingDaemon = null;
+        pingStatus = { testing: false, online: null, latencyMs: null, error: null };
     }
 
     async function updateDaemon() {
@@ -215,7 +276,8 @@
                 name: editDaemon.name,
                 host: editDaemon.host,
                 port: editDaemon.port,
-                location: editDaemon.location || undefined
+                location: editDaemon.location || undefined,
+                secure: editDaemon.secure
             });
             closeEditModal();
             await loadData();
@@ -301,6 +363,53 @@
                         </label>
                         <input type="text" id="location" bind:value={newDaemon.location} class="input" placeholder="e.g. US-East" />
                     </div>
+
+                    <!-- Secure Connection Toggle -->
+                    <div class="flex items-center justify-between p-4 rounded-lg bg-dark-800/50">
+                        <div>
+                            <label for="secure" class="text-sm font-medium text-white">Secure Connection (HTTPS)</label>
+                            <p class="text-xs text-dark-400 mt-1">Enable if daemon is running with TLS certificates</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" bind:checked={newDaemon.secure} class="sr-only peer" id="secure" />
+                            <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Connection Status Indicator -->
+                    {#if newDaemon.host && newDaemon.port}
+                        <div class="flex items-center gap-3 p-3 rounded-lg {pingStatus.testing ? 'bg-dark-800/50' : pingStatus.online === true ? 'bg-emerald-500/10 border border-emerald-500/20' : pingStatus.online === false ? 'bg-red-500/10 border border-red-500/20' : 'bg-dark-800/50'}">
+                            {#if pingStatus.testing}
+                                <div class="spinner w-4 h-4"></div>
+                                <span class="text-sm text-dark-400">Testing connection...</span>
+                            {:else if pingStatus.online === true}
+                                <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div class="flex-1">
+                                    <span class="text-sm text-emerald-400 font-medium">Connection successful</span>
+                                    {#if pingStatus.latencyMs}
+                                        <span class="text-xs text-dark-400 ml-2">({pingStatus.latencyMs}ms)</span>
+                                    {/if}
+                                </div>
+                            {:else if pingStatus.online === false}
+                                <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                                </svg>
+                                <div class="flex-1">
+                                    <span class="text-sm text-red-400 font-medium">Connection failed</span>
+                                    {#if pingStatus.error}
+                                        <p class="text-xs text-dark-400 mt-0.5">{pingStatus.error}</p>
+                                    {/if}
+                                </div>
+                            {:else}
+                                <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
+                                </svg>
+                                <span class="text-sm text-dark-400">Enter host and port to test connection</span>
+                            {/if}
+                        </div>
+                    {/if}
 
                     <div class="flex gap-3 pt-4">
                         <button type="submit" class="btn-success flex-1" disabled={creating}>
@@ -564,6 +673,53 @@
                         </label>
                         <input type="text" id="edit-location" bind:value={editDaemon.location} class="input" placeholder="e.g. US-East" />
                     </div>
+
+                    <!-- Secure Connection Toggle -->
+                    <div class="flex items-center justify-between p-4 rounded-lg bg-dark-800/50">
+                        <div>
+                            <label for="edit-secure" class="text-sm font-medium text-white">Secure Connection (HTTPS)</label>
+                            <p class="text-xs text-dark-400 mt-1">Enable if daemon is running with TLS certificates</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" bind:checked={editDaemon.secure} class="sr-only peer" id="edit-secure" />
+                            <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Connection Status Indicator -->
+                    {#if editDaemon.host && editDaemon.port}
+                        <div class="flex items-center gap-3 p-3 rounded-lg {pingStatus.testing ? 'bg-dark-800/50' : pingStatus.online === true ? 'bg-emerald-500/10 border border-emerald-500/20' : pingStatus.online === false ? 'bg-red-500/10 border border-red-500/20' : 'bg-dark-800/50'}">
+                            {#if pingStatus.testing}
+                                <div class="spinner w-4 h-4"></div>
+                                <span class="text-sm text-dark-400">Testing connection...</span>
+                            {:else if pingStatus.online === true}
+                                <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div class="flex-1">
+                                    <span class="text-sm text-emerald-400 font-medium">Connection successful</span>
+                                    {#if pingStatus.latencyMs}
+                                        <span class="text-xs text-dark-400 ml-2">({pingStatus.latencyMs}ms)</span>
+                                    {/if}
+                                </div>
+                            {:else if pingStatus.online === false}
+                                <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                                </svg>
+                                <div class="flex-1">
+                                    <span class="text-sm text-red-400 font-medium">Connection failed</span>
+                                    {#if pingStatus.error}
+                                        <p class="text-xs text-dark-400 mt-0.5">{pingStatus.error}</p>
+                                    {/if}
+                                </div>
+                            {:else}
+                                <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
+                                </svg>
+                                <span class="text-sm text-dark-400">Enter host and port to test connection</span>
+                            {/if}
+                        </div>
+                    {/if}
 
                     <div class="flex gap-3 pt-4">
                         <button type="submit" class="btn-primary flex-1" disabled={editing}>

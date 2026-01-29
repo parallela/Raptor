@@ -64,6 +64,7 @@ export interface Daemon {
     port: number;
     apiKey: string;
     location?: string;
+    secure?: boolean;
     // Daemon capacity
     totalMemory?: number;
     totalCpu?: number;
@@ -80,6 +81,7 @@ export interface Allocation {
     daemonId: string;
     ip: string;
     port: number;
+    containerId?: string;
     createdAt: string;
     updatedAt: string;
 }

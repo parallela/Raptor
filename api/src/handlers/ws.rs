@@ -54,9 +54,10 @@ async fn handle_logs_ws(socket: WebSocket, daemon: Daemon, container: Container)
     let (mut sender, mut receiver) = socket.split();
 
     // Connect to daemon WebSocket with API key
+    let ws_protocol = if daemon.secure { "wss" } else { "ws" };
     let daemon_ws_url = format!(
-        "ws://{}:{}/ws/containers/{}/logs?api_key={}",
-        daemon.host, daemon.port, container.id, daemon.api_key
+        "{}://{}:{}/ws/containers/{}/logs?api_key={}",
+        ws_protocol, daemon.host, daemon.port, container.id, daemon.api_key
     );
 
     tracing::info!("Connecting to daemon WebSocket: {}", daemon_ws_url);
@@ -156,9 +157,10 @@ async fn handle_stats_ws(socket: WebSocket, daemon: Daemon, container: Container
     let (mut sender, mut receiver) = socket.split();
 
     // Connect to daemon WebSocket for stats
+    let ws_protocol = if daemon.secure { "wss" } else { "ws" };
     let daemon_ws_url = format!(
-        "ws://{}:{}/ws/containers/{}/stats?api_key={}",
-        daemon.host, daemon.port, container.id, daemon.api_key
+        "{}://{}:{}/ws/containers/{}/stats?api_key={}",
+        ws_protocol, daemon.host, daemon.port, container.id, daemon.api_key
     );
 
     tracing::info!("Connecting to daemon stats WebSocket: {}", daemon_ws_url);

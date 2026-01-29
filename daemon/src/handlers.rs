@@ -1558,16 +1558,26 @@ pub async fn write_file(
     let container_path = std::path::Path::new(&base_path).join("volumes").join(&container_name);
     let full_path = container_path.join(req.path.trim_start_matches('/'));
 
+    tracing::info!("write_file: container={}, path={}, full_path={:?}", container_name, req.path, full_path);
+
     if !full_path.starts_with(&container_path) {
+        tracing::warn!("write_file: path traversal attempt blocked");
         return Err(StatusCode::FORBIDDEN);
     }
 
     if let Some(parent) = full_path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            tracing::error!("write_file: failed to create parent dirs: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
     }
 
-    tokio::fs::write(&full_path, req.content).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Err(e) = tokio::fs::write(&full_path, &req.content).await {
+        tracing::error!("write_file: failed to write file {:?}: {}", full_path, e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
+    tracing::info!("write_file: saved {} bytes to {:?}", req.content.len(), full_path);
     Ok(Json(serde_json::json!({"message": "File saved successfully"})))
 }
 

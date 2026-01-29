@@ -57,6 +57,11 @@ fn load_tls_config(cert_path: &str, key_path: &str) -> anyhow::Result<axum_serve
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
+    // Install the ring crypto provider for rustls before any TLS operations
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),

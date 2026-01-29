@@ -93,7 +93,51 @@ impl DockerManager {
             tracing::warn!("Failed to create volume directory {}: {}", volume_path, e);
         }
 
+        // Set permissions for container user to write to the volume
+        #[cfg(unix)]
+        {
+            let chmod_result = tokio::process::Command::new("chmod")
+                .args(["-R", "777", &volume_path])
+                .output()
+                .await;
+            match chmod_result {
+                Ok(output) if output.status.success() => {
+                    tracing::debug!("Set permissions 777 on {}", volume_path);
+                }
+                Ok(output) => {
+                    tracing::warn!(
+                        "Failed to chmod volume directory {}: {}",
+                        volume_path,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to run chmod on volume directory {}: {}", volume_path, e);
+                }
+            }
+        }
+
         let binds = vec![format!("{}:/home/container:rw", volume_path)];
+
+        // Get the current user's UID and GID to pass to the container
+        // This ensures files created in the container are owned by the daemon user
+        #[cfg(unix)]
+        let user_spec = {
+            use std::os::unix::fs::MetadataExt;
+            // Try to get UID/GID from the volume directory
+            if let Ok(metadata) = std::fs::metadata(&volume_path) {
+                let uid = metadata.uid();
+                let gid = metadata.gid();
+                Some(format!("{}:{}", uid, gid))
+            } else {
+                // Fallback: get current process UID/GID
+                let uid = unsafe { libc::getuid() };
+                let gid = unsafe { libc::getgid() };
+                Some(format!("{}:{}", uid, gid))
+            }
+        };
+        #[cfg(not(unix))]
+        let user_spec: Option<String> = None;
 
         let host_config = bollard::service::HostConfig {
             port_bindings: port_bindings.as_ref().map(|pb| pb.iter().map(|(k, v)| (k.clone(), Some(v.clone()))).collect()),
@@ -119,6 +163,8 @@ impl DockerManager {
             env: env_vars.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
+            // Run container as the daemon user's UID:GID so files are accessible via FTP
+            user: user_spec.as_deref(),
             exposed_ports: if exposed_port_keys.is_empty() {
                 None
             } else {
@@ -387,7 +433,53 @@ impl DockerManager {
             tracing::warn!("Failed to create volume directory {}: {}", volume_path, e);
         }
 
+        // Set permissions for container user to write to the volume
+        #[cfg(unix)]
+        {
+            let chmod_result = tokio::process::Command::new("chmod")
+                .args(["-R", "777", &volume_path])
+                .output()
+                .await;
+            match chmod_result {
+                Ok(output) if output.status.success() => {
+                    tracing::debug!("Set permissions 777 on {}", volume_path);
+                }
+                Ok(output) => {
+                    tracing::warn!(
+                        "Failed to chmod volume directory {}: {}",
+                        volume_path,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to run chmod on volume directory {}: {}", volume_path, e);
+                }
+            }
+        }
+
         let binds = vec![format!("{}:/home/container:rw", volume_path)];
+
+        // Get the current user's UID and GID to pass to the container
+        // This ensures files created during installation are owned by the daemon user
+        #[cfg(unix)]
+        let user_spec = {
+            use std::os::unix::fs::MetadataExt;
+            // Try to get UID/GID from the volume directory
+            if let Ok(metadata) = std::fs::metadata(&volume_path) {
+                let uid = metadata.uid();
+                let gid = metadata.gid();
+                Some(format!("{}:{}", uid, gid))
+            } else {
+                // Fallback: get current process UID/GID
+                let uid = unsafe { libc::getuid() };
+                let gid = unsafe { libc::getgid() };
+                Some(format!("{}:{}", uid, gid))
+            }
+        };
+        #[cfg(not(unix))]
+        let install_user_spec: Option<String> = None;
+        #[cfg(unix)]
+        let install_user_spec = user_spec;
 
         // Log the install script (first 500 chars for brevity)
         let script_preview = if script.len() > 500 {
@@ -427,6 +519,8 @@ impl DockerManager {
             cmd: Some(vec![&full_script]),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
+            // Run as the daemon user's UID:GID so files are accessible via FTP
+            user: install_user_spec.as_deref(),
             env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
             tty: Some(false),
             attach_stdout: Some(true),

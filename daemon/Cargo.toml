@@ -24,6 +24,8 @@ libunftp = { version = "0.21.1", default-features = false }
 unftp-sbe-fs = "0.3.0"
 async-trait = "0.1"
 bcrypt = "0.15"
+# Unix support
+libc = "0.2"
 # TLS support with rustls (using ring crypto backend for cross-compilation)
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2"

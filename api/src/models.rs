@@ -55,8 +55,17 @@ pub struct Daemon {
     pub port: i32,
     pub api_key: String,
     pub location: Option<String>,
+    pub secure: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Daemon {
+    /// Get the base URL for this daemon (http or https based on secure flag)
+    pub fn base_url(&self) -> String {
+        let scheme = if self.secure { "https" } else { "http" };
+        format!("{}://{}:{}", scheme, self.host, self.port)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -283,6 +292,8 @@ pub struct CreateDaemonRequest {
     pub host: String,
     pub port: i32,
     pub location: Option<String>,
+    #[serde(default)]
+    pub secure: bool,
 }
 
 #[derive(Debug, Deserialize)]
