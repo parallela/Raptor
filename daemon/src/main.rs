@@ -18,6 +18,41 @@ use crate::docker::DockerManager;
 use crate::models::{AppState, ContainerLocks};
 use crate::ftp::FtpServerState;
 
+/// Load TLS configuration from certificate and key files
+fn load_tls_config(cert_path: &str, key_path: &str) -> anyhow::Result<axum_server::tls_rustls::RustlsConfig> {
+    use std::fs::File;
+    use std::io::BufReader;
+    use rustls_pemfile::{certs, private_key};
+
+    // Read certificate chain
+    let cert_file = File::open(cert_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open certificate file '{}': {}", cert_path, e))?;
+    let mut cert_reader = BufReader::new(cert_file);
+    let certs: Vec<_> = certs(&mut cert_reader)
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if certs.is_empty() {
+        anyhow::bail!("No certificates found in '{}'", cert_path);
+    }
+
+    // Read private key
+    let key_file = File::open(key_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open key file '{}': {}", key_path, e))?;
+    let mut key_reader = BufReader::new(key_file);
+    let key = private_key(&mut key_reader)
+        .map_err(|e| anyhow::anyhow!("Failed to parse private key: {}", e))?
+        .ok_or_else(|| anyhow::anyhow!("No private key found in '{}'", key_path))?;
+
+    // Build rustls config
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs.into_iter().map(|c| c.into()).collect(), key.into())
+        .map_err(|e| anyhow::anyhow!("Failed to build TLS config: {}", e))?;
+
+    Ok(axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(config)))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
@@ -114,9 +149,32 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let listener = tokio::net::TcpListener::bind(&config.daemon_addr).await?;
-    tracing::info!("Daemon listening on {}", config.daemon_addr);
-    axum::serve(listener, app).await?;
+    // Check for TLS configuration
+    let tls_cert_path = std::env::var("TLS_CERT_PATH").ok();
+    let tls_key_path = std::env::var("TLS_KEY_PATH").ok();
+
+    let addr: std::net::SocketAddr = config.daemon_addr.parse()?;
+
+    match (tls_cert_path, tls_key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            // HTTPS mode
+            tracing::info!("Loading TLS certificates from {} and {}", cert_path, key_path);
+            let tls_config = load_tls_config(&cert_path, &key_path)?;
+            tracing::info!("Daemon listening on {} (HTTPS)", addr);
+            axum_server::bind_rustls(addr, tls_config)
+                .serve(app.into_make_service())
+                .await?;
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            anyhow::bail!("Both TLS_CERT_PATH and TLS_KEY_PATH must be set for HTTPS");
+        }
+        (None, None) => {
+            // HTTP mode (default)
+            let listener = tokio::net::TcpListener::bind(&config.daemon_addr).await?;
+            tracing::info!("Daemon listening on {} (HTTP)", config.daemon_addr);
+            axum::serve(listener, app).await?;
+        }
+    }
 
     Ok(())
 }

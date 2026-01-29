@@ -8,23 +8,28 @@ axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-bollard = "0.16"
-uuid = { version = "1", features = ["v4", "serde"] }
+bollard = { version = "0.16", default-features = false, features = ["ssl", "time"] }
 chrono = { version = "0.4", features = ["serde"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = "0.3"
-tokio-tungstenite = "0.21"
 dotenvy = "0.15"
-thiserror = "1"
 dashmap = "5"
 anyhow = "1"
 regex = "1"
-time = "=0.3.36"
 sysinfo = "0.31"
 # FTP server
-libunftp = "0.21.1"
+libunftp = { version = "0.21.1", default-features = false }
 unftp-sbe-fs = "0.3.0"
 async-trait = "0.1"
 bcrypt = "0.15"
+# TLS support with rustls (using ring crypto backend for cross-compilation)
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls"] }
+
+[features]
+default = []
+
+
