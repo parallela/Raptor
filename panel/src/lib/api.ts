@@ -158,11 +158,14 @@ export const api = {
 
     // Users
     getMe: () => request<User>('/users/me'),
-    listUsers: () => request<User[]>('/users'),
+    listUsers: async (): Promise<User[]> => {
+        const response = await request<{ data: User[]; total: number; page: number; perPage: number; totalPages: number }>('/users');
+        return response.data;
+    },
     getUser: (id: string) => request<User>(`/users/${id}`),
     updateUser: (id: string, data: { username?: string; roleId?: string }) =>
         request<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+    deleteUser: (id: string) => request<void>(`/admin/users/${id}`, { method: 'DELETE' }),
     searchUsers: (query: string, limit: number = 10) =>
         request<User[]>(`/admin/users/search?q=${encodeURIComponent(query)}&limit=${limit}`),
     inviteUser: (email: string, roleId?: string) =>
@@ -180,10 +183,10 @@ export const api = {
     listRoles: () => request<{ id: string; name: string; permissions: Record<string, boolean> }[]>('/roles'),
     getRole: (id: string) => request<{ id: string; name: string; permissions: Record<string, boolean> }>(`/roles/${id}`),
     createRole: (data: { name: string; permissions: Record<string, boolean> }) =>
-        request<{ id: string; name: string; permissions: Record<string, boolean> }>('/roles', { method: 'POST', body: JSON.stringify(data) }),
+        request<{ id: string; name: string; permissions: Record<string, boolean> }>('/admin/roles', { method: 'POST', body: JSON.stringify(data) }),
     updateRole: (id: string, data: { name: string; permissions: Record<string, boolean> }) =>
-        request<{ id: string; name: string; permissions: Record<string, boolean> }>(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    deleteRole: (id: string) => request<void>(`/roles/${id}`, { method: 'DELETE' }),
+        request<{ id: string; name: string; permissions: Record<string, boolean> }>(`/admin/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteRole: (id: string) => request<void>(`/admin/roles/${id}`, { method: 'DELETE' }),
 
     // Files
     listFiles: (containerId: string, path: string = '/') =>

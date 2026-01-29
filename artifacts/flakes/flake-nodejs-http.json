@@ -1,0 +1,40 @@
+{
+    "name": "Node.js HTTP Server",
+    "slug": "nodejs-http",
+    "author": "Raptor Panel",
+    "description": "Simple Node.js HTTP server for web applications and APIs",
+    "docker_image": "artifacts.lstan.eu/nodejs:22",
+    "startup_command": "node {{JS_FILE}}",
+    "config_files": {},
+    "startup_detection": "Server listening on port",
+    "install_script": "# Create default index.js if it doesn't exist\nif [ ! -f index.js ]; then\n  echo \"Creating default index.js...\"\n  cat > index.js << 'JSEOF'\nconst http = require('http');\n\nconst PORT = process.env.SERVER_PORT || 3000;\n\nconst server = http.createServer((req, res) => {\n  res.writeHead(200, { 'Content-Type': 'text/plain' });\n  res.end('Hello from Raptor Node.js Server!\\n');\n});\n\nserver.listen(PORT, '0.0.0.0', () => {\n  console.log(`Server listening on port ${PORT}`);\n});\nJSEOF\n  echo \"Default index.js created!\"\nfi\n\n# Create package.json if it doesn't exist\nif [ ! -f package.json ]; then\n  echo \"Creating default package.json...\"\n  cat > package.json << 'PKGEOF'\n{\n  \"name\": \"raptor-nodejs-app\",\n  \"version\": \"1.0.0\",\n  \"main\": \"index.js\",\n  \"scripts\": {\n    \"start\": \"node index.js\"\n  }\n}\nPKGEOF\n  echo \"Default package.json created!\"\nfi",
+    "variables": [
+        {
+            "name": "JavaScript File",
+            "description": "The main JavaScript file to run",
+            "env_variable": "JS_FILE",
+            "default_value": "index.js",
+            "rules": "required|string|max:100",
+            "user_viewable": true,
+            "user_editable": true
+        },
+        {
+            "name": "Server Port",
+            "description": "The port the server will listen on",
+            "env_variable": "SERVER_PORT",
+            "default_value": "3000",
+            "rules": "required|integer|min:1|max:65535",
+            "user_viewable": true,
+            "user_editable": true
+        },
+        {
+            "name": "Node Environment",
+            "description": "Node.js environment (development, production)",
+            "env_variable": "NODE_ENV",
+            "default_value": "production",
+            "rules": "required|string|in:development,production",
+            "user_viewable": true,
+            "user_editable": true
+        }
+    ]
+}

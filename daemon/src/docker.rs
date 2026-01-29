@@ -57,14 +57,9 @@ impl DockerManager {
             }
         }
 
-        // Use exec to replace the shell with the actual process, so stdin goes directly to it
-        // This makes PID 1 be the actual java process instead of /bin/sh
-        let cmd_strings: Option<Vec<String>> = startup_script.map(|s| {
-            vec!["/bin/sh".to_string(), "-c".to_string(), format!("exec {}", s)]
-        });
-        let cmd: Option<Vec<&str>> = cmd_strings.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-
         // Set STARTUP env var for the entrypoint.sh to use
+        // We don't set cmd because our custom images use an entrypoint.sh that reads STARTUP
+        // This allows the entrypoint to do setup (print versions, parse variables, etc.)
         let env_vars: Option<Vec<String>> = startup_script.map(|s| {
             vec![format!("STARTUP={}", s)]
         });
@@ -159,7 +154,7 @@ impl DockerManager {
 
         let config = Config {
             image: Some(image),
-            cmd,
+            // Don't set cmd - let the image's entrypoint.sh use the STARTUP env var
             env: env_vars.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),

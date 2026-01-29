@@ -36,6 +36,22 @@ export const isManager = derived(user, ($user) => {
     return $user.roleName === 'manager' || $user.roleName === 'admin' || $user.permissions?.['*'] === true;
 });
 
+// Check if user can create containers
+export const canCreateContainers = derived(user, ($user) => {
+    if (!$user) return false;
+    if ($user.permissions?.['*'] === true) return true;
+    if ($user.roleName === 'admin' || $user.roleName === 'manager') return true;
+    return $user.permissions?.['containers.create'] === true;
+});
+
+// Check if user can view daemons page
+export const canViewDaemons = derived(user, ($user) => {
+    if (!$user) return false;
+    if ($user.permissions?.['*'] === true) return true;
+    if ($user.roleName === 'admin' || $user.roleName === 'manager') return true;
+    return $user.permissions?.['daemons.view'] === true;
+});
+
 export function hasPermission(permission: string): boolean {
     const $user = get(user);
     if (!$user) return false;

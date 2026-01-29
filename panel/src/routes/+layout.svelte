@@ -1,7 +1,7 @@
 <script lang="ts">
     import '../app.css';
     import { Toaster } from 'svelte-french-toast';
-    import { user, token, isAdmin, isManager } from '$lib/stores';
+    import { user, token, isAdmin, isManager, canViewDaemons } from '$lib/stores';
     import { goto } from '$app/navigation';
     import { page } from '$app/stores';
 
@@ -17,7 +17,7 @@
     $: navItems = [
         { href: '/', label: 'Dashboard', icon: 'dashboard', show: true },
         { href: '/containers', label: 'Containers', icon: 'containers', show: true },
-        { href: '/daemons', label: 'Daemons', icon: 'daemons', show: true },
+        { href: '/daemons', label: 'Daemons', icon: 'daemons', show: $canViewDaemons },
         { href: '/admin', label: 'Admin', icon: 'admin', show: $isAdmin || $isManager },
     ].filter(item => item.show);
 

@@ -321,15 +321,21 @@ pub async fn invite_user(
     .await?;
 
     if let Some(ref smtp_config) = state.config.smtp {
-        if let Ok(email_service) = crate::email::EmailService::new(smtp_config, &state.config.app_url) {
-            let _ = email_service.send_invite_email(
-                &req.email,
-                &token,
-                &claims.username,
-            ).await;
+        match crate::email::EmailService::new(smtp_config, &state.config.app_url) {
+            Ok(email_service) => {
+                match email_service.send_invite_email(
+                    &req.email,
+                    &token,
+                    &claims.username,
+                ).await {
+                    Ok(_) => tracing::info!("Invite email sent to {}", req.email),
+                    Err(e) => tracing::error!("Failed to send invite email to {}: {}", req.email, e),
+                }
+            },
+            Err(e) => tracing::error!("Failed to create email service: {}", e),
         }
     } else {
-        tracing::info!("Invite token for {}: {}", req.email, token);
+        tracing::info!("SMTP not configured. Invite token for {}: {}", req.email, token);
     }
 
     Ok(Json(serde_json::json!({

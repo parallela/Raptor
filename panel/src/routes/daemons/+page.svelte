@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { api } from '$lib/api';
-    import { user } from '$lib/stores';
+    import { user, canViewDaemons } from '$lib/stores';
     import { goto } from '$app/navigation';
     import toast from 'svelte-french-toast';
     import type { Daemon } from '$lib/types';
@@ -106,6 +106,12 @@
     onMount(async () => {
         if (!$user) {
             goto('/login');
+            return;
+        }
+        // Check if user has permission to view daemons
+        if (!$canViewDaemons) {
+            toast.error('You do not have permission to view daemons');
+            goto('/containers');
             return;
         }
         await loadData();

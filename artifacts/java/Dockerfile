@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.description="Java 21 runtime for game servers"
 LABEL org.opencontainers.image.title="artifacts.lstan.eu/java"
 LABEL org.opencontainers.image.version="21"
 
-# Install required packages
+# Install required packages including tini for proper signal handling
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     locales \
     jq \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up locale
@@ -56,5 +57,5 @@ ENV USER=container
 ENV HOME=/home/container
 ENV STARTUP="java -Xms128M -Xmx1024M -jar server.jar"
 
-# Entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+# Entrypoint - use tini for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.sh"]

@@ -1,0 +1,9 @@
+{
+  "name": "raptor-nodejs-server",
+  "version": "1.0.0",
+  "description": "Node.js HTTP Server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  }
+}

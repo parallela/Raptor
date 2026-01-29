@@ -251,6 +251,7 @@ pub async fn import_flake(
     let description = egg["description"].as_str().map(|s| s.to_string());
     let startup_command = egg["startup"].as_str()
         .or_else(|| egg["startupCommand"].as_str())
+        .or_else(|| egg["startup_command"].as_str())
         .unwrap_or("").to_string();
 
     // Use provided dockerImage or default to our artifact
@@ -274,6 +275,7 @@ pub async fn import_flake(
 
     let mut install_script = egg["scripts"]["installation"]["script"].as_str()
         .or_else(|| egg["installScript"].as_str())
+        .or_else(|| egg["install_script"].as_str())
         .map(|s| s.to_string());
     if let Some(ref mut script) = install_script {
         if !script.contains("eula=true") {

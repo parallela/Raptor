@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { api } from '$lib/api';
-    import { user } from '$lib/stores';
+    import { user, canCreateContainers, isAdmin } from '$lib/stores';
     import { Select } from '$lib/components';
     import UserSearch from '$lib/components/UserSearch.svelte';
     import { goto } from '$app/navigation';
@@ -36,8 +36,6 @@
         userId: ''
     };
 
-    // Check if current user is admin/manager
-    $: isAdmin = $user?.roleName === 'admin' || $user?.roleName === 'manager';
 
     onMount(async () => {
         if (!$user) {
@@ -222,16 +220,18 @@
             <h1 class="section-title">Servers</h1>
             <p class="section-subtitle">Manage your game servers and applications</p>
         </div>
-        <button on:click={() => showCreate = true} class="btn-primary">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Create Server
-        </button>
+        {#if $canCreateContainers}
+            <button on:click={() => showCreate = true} class="btn-primary">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Create Server
+            </button>
+        {/if}
     </div>
 
     <!-- Create Modal -->
-    {#if showCreate}
+    {#if showCreate && $canCreateContainers}
         <div class="fixed inset-0 z-50 overflow-y-auto">
             <!-- Backdrop -->
             <div
@@ -412,7 +412,7 @@
                     </div>
 
                     <!-- User Assignment (Admin only) -->
-                    {#if isAdmin}
+                    {#if $isAdmin}
                         <div class="input-group">
                             <label for="user-assign" class="input-label">
                                 Assign to User
