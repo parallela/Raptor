@@ -360,8 +360,9 @@ pub async fn create_container(
     // Create additional allocations if provided (already validated above)
     for additional_allocation_id in &req.additional_allocations {
         // Find matching allocation from allocations_for_daemon
+        let alloc_id_str = additional_allocation_id.to_string();
         if let Some(alloc_json) = allocations_for_daemon.iter().find(|a| {
-            a["allocationId"].as_str() == Some(&additional_allocation_id.to_string())
+            a["allocationId"].as_str() == Some(alloc_id_str.as_str())
         }) {
             let ip = alloc_json["ip"].as_str().unwrap_or("");
             let port = alloc_json["port"].as_i64().unwrap_or(0) as i32;
@@ -1825,6 +1826,8 @@ pub async fn upload_file_chunk(
     Path(id): Path<Uuid>,
     mut multipart: axum::extract::Multipart,
 ) -> AppResult<Json<serde_json::Value>> {
+    tracing::info!("upload_file_chunk: Starting chunk upload for container {}", id);
+
     let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
@@ -1842,19 +1845,47 @@ pub async fn upload_file_chunk(
     let mut path: Option<String> = None;
     let mut chunk_data: Option<Vec<u8>> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(format!("Multipart error: {}", e)))? {
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        tracing::error!("upload_file_chunk: Multipart next_field error: {}", e);
+        AppError::BadRequest(format!("Multipart error: {}", e))
+    })? {
         let field_name = field.name().unwrap_or("").to_string();
+        tracing::debug!("upload_file_chunk: Processing field: {}", field_name);
 
         match field_name.as_str() {
-            "uploadId" => upload_id = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?),
-            "chunkIndex" => chunk_index = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.parse().map_err(|_| AppError::BadRequest("Invalid chunk index".to_string()))?),
-            "totalChunks" => total_chunks = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.parse().map_err(|_| AppError::BadRequest("Invalid total chunks".to_string()))?),
-            "path" => path = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?),
+            "uploadId" => upload_id = Some(field.text().await.map_err(|e| {
+                tracing::error!("upload_file_chunk: Error reading uploadId: {}", e);
+                AppError::BadRequest(format!("Read error: {}", e))
+            })?),
+            "chunkIndex" => chunk_index = Some(field.text().await.map_err(|e| {
+                tracing::error!("upload_file_chunk: Error reading chunkIndex: {}", e);
+                AppError::BadRequest(format!("Read error: {}", e))
+            })?.parse().map_err(|_| AppError::BadRequest("Invalid chunk index".to_string()))?),
+            "totalChunks" => total_chunks = Some(field.text().await.map_err(|e| {
+                tracing::error!("upload_file_chunk: Error reading totalChunks: {}", e);
+                AppError::BadRequest(format!("Read error: {}", e))
+            })?.parse().map_err(|_| AppError::BadRequest("Invalid total chunks".to_string()))?),
+            "path" => path = Some(field.text().await.map_err(|e| {
+                tracing::error!("upload_file_chunk: Error reading path: {}", e);
+                AppError::BadRequest(format!("Read error: {}", e))
+            })?),
             "fileName" | "fileSize" => { /* Ignored - daemon handles these */ }
-            "chunk" => chunk_data = Some(field.bytes().await.map_err(|e| AppError::BadRequest(format!("Read error: {}", e)))?.to_vec()),
-            _ => {}
+            "chunk" => {
+                tracing::info!("upload_file_chunk: Reading chunk data...");
+                chunk_data = Some(field.bytes().await.map_err(|e| {
+                    tracing::error!("upload_file_chunk: Error reading chunk bytes: {}", e);
+                    AppError::BadRequest(format!("Read error: {}", e))
+                })?.to_vec());
+                tracing::info!("upload_file_chunk: Chunk data read, size: {} bytes", chunk_data.as_ref().map(|d| d.len()).unwrap_or(0));
+            }
+            _ => {
+                tracing::debug!("upload_file_chunk: Ignoring unknown field: {}", field_name);
+            }
         }
     }
+
+    tracing::info!("upload_file_chunk: Parsed - uploadId: {:?}, chunkIndex: {:?}, totalChunks: {:?}, path: {:?}, chunk_size: {:?}",
+        upload_id, chunk_index, total_chunks, path, chunk_data.as_ref().map(|d| d.len()));
 
     let upload_id = upload_id.ok_or_else(|| AppError::BadRequest("Missing uploadId".to_string()))?;
     let chunk_index = chunk_index.ok_or_else(|| AppError::BadRequest("Missing chunkIndex".to_string()))?;
@@ -1862,6 +1893,8 @@ pub async fn upload_file_chunk(
     let path = path.ok_or_else(|| AppError::BadRequest("Missing path".to_string()))?;
     let chunk_data = chunk_data.ok_or_else(|| AppError::BadRequest("Missing chunk data".to_string()))?;
 
+    tracing::info!("upload_file_chunk: Getting daemon info for container {}", container.id);
+    
     // Get daemon info
     let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
         .bind(container.daemon_id)
@@ -1869,16 +1902,22 @@ pub async fn upload_file_chunk(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    tracing::info!("upload_file_chunk: Found daemon {}, encoding {} bytes to base64", daemon.id, chunk_data.len());
+    
     // Forward chunk directly to daemon - no buffering in API!
     let content_base64 = general_purpose::STANDARD.encode(&chunk_data);
+    
+    tracing::info!("upload_file_chunk: Base64 encoded size: {} bytes", content_base64.len());
 
     let client = daemon_client();
     let url = format!("{}/containers/{}/files/write-chunk", daemon.base_url(), container.id);
+    
+    tracing::info!("upload_file_chunk: Sending chunk {} of {} to daemon at {}", chunk_index, total_chunks, url);
 
     let resp = client
         .post(&url)
         .header("X-API-Key", &daemon.api_key)
-        .timeout(std::time::Duration::from_secs(60)) // Longer timeout for chunks
+        .timeout(std::time::Duration::from_secs(120)) // Longer timeout for large chunks
         .json(&serde_json::json!({
             "uploadId": upload_id,
             "chunkIndex": chunk_index,
@@ -1888,17 +1927,28 @@ pub async fn upload_file_chunk(
         }))
         .send()
         .await
-        .map_err(|e| AppError::BadRequest(format!("Daemon error: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("upload_file_chunk: Daemon request failed: {}", e);
+            AppError::BadRequest(format!("Daemon error: {}", e))
+        })?;
+
+    tracing::info!("upload_file_chunk: Daemon responded with status {}", resp.status());
 
     if !resp.status().is_success() {
         let status = resp.status();
         let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        tracing::error!("upload_file_chunk: Daemon error {}: {}", status, error_text);
         return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
     }
 
     // Return daemon's response (includes completion status)
     let daemon_response: serde_json::Value = resp.json().await
-        .map_err(|e| AppError::BadRequest(format!("Invalid daemon response: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("upload_file_chunk: Failed to parse daemon response: {}", e);
+            AppError::BadRequest(format!("Invalid daemon response: {}", e))
+        })?;
+    
+    tracing::info!("upload_file_chunk: Chunk {} uploaded successfully", chunk_index);
 
     Ok(Json(daemon_response))
 }

@@ -23,8 +23,8 @@ use crate::middleware::{require_permission, require_admin, require_manager};
 /// Chunk size for large file uploads (55MB)
 pub const UPLOAD_CHUNK_SIZE: usize = 55 * 1024 * 1024;
 
-/// Maximum body size for chunk uploads (chunk size + overhead for base64 encoding and JSON)
-pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 5 * 1024 * 1024; // 60MB
+/// Maximum body size for chunk uploads - accounts for multipart overhead
+pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 10 * 1024 * 1024; // 65MB for multipart
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

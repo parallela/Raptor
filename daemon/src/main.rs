@@ -22,8 +22,9 @@ use crate::ftp::FtpServerState;
 /// Chunk size for large file uploads (55MB)
 pub const UPLOAD_CHUNK_SIZE: usize = 55 * 1024 * 1024;
 
-/// Maximum body size for chunk uploads (chunk size + overhead for base64 encoding and JSON)
-pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 5 * 1024 * 1024; // 60MB
+/// Maximum body size for chunk uploads
+/// Base64 adds ~33% overhead: 55MB * 1.33 = ~73MB, plus JSON structure = ~80MB
+pub const UPLOAD_CHUNK_BODY_LIMIT: usize = 80 * 1024 * 1024; // 80MB
 
 /// Maximum body size for full file writes (500MB)
 pub const MAX_FILE_WRITE_SIZE: usize = 500 * 1024 * 1024;
