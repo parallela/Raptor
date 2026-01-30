@@ -59,10 +59,10 @@
     <div class="relative w-full max-w-md animate-slide-up">
         <!-- Logo -->
         <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-dark-800/50 shadow-xl shadow-primary-500/20 mb-4 p-2">
-                <img src="/logo.webp" alt="Raptor Logo" class="w-full h-full object-contain" />
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-dark-700/50 shadow-xl shadow-primary-500/20 mb-4">
+                <img src="/favicon.png" alt="Raptor Logo" class="w-14 h-14 object-contain" />
             </div>
-            <h1 class="text-3xl font-bold text-white">Raptor</h1>
+            <h1 class="text-2xl font-bold text-white">Raptor</h1>
             <p class="text-dark-400 mt-2">Container Management Panel</p>
         </div>
 

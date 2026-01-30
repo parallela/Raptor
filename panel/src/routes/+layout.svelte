@@ -47,12 +47,9 @@
             <!-- Sidebar -->
             <aside class="fixed left-0 top-0 h-screen w-64 bg-dark-900/80 backdrop-blur-xl border-r border-dark-700/50 flex flex-col z-40">
                 <!-- Logo -->
-                <div class="h-16 flex items-center px-6 border-b border-dark-700/50">
-                    <a href="/" class="flex items-center gap-3">
-                        <div class="w-9 h-9 rounded-lg bg-dark-800/50 flex items-center justify-center shadow-lg">
-                            <img src="/logo.webp" alt="Raptor" class="w-7 h-7 object-contain" />
-                        </div>
-                        <span class="text-xl font-bold bg-gradient-to-r from-white to-dark-300 bg-clip-text text-transparent">Raptor</span>
+                <div class="h-28 flex items-center justify-center px-3 border-b border-dark-700/50 bg-gray-400">
+                    <a href="/" class="flex items-center justify-center w-full">
+                        <img src="/logo.webp" alt="Raptor" class="w-full object-contain brightness-110 contrast-110" />
                     </a>
                 </div>
 

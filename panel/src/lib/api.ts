@@ -151,12 +151,12 @@ export const api = {
     getDaemon: (id: string) => request<Daemon>(`/daemons/${id}`),
     getDaemonStatus: (id: string) => request<{ id: string; status: string; system?: { totalMemory: number; availableMemory: number; cpuCores: number; cpuUsage: number; totalDisk: number; availableDisk: number; hostname: string } }>(`/daemons/${id}/status`),
     createDaemon: (data: { name: string; host: string; port: number; location?: string; secure?: boolean; totalMemory?: number; totalCpu?: number; totalDisk?: number }) =>
-        request<Daemon>('/daemons', { method: 'POST', body: JSON.stringify(data) }),
+        request<Daemon>('/admin/daemons', { method: 'POST', body: JSON.stringify(data) }),
     updateDaemon: (id: string, data: Partial<Daemon>) =>
-        request<Daemon>(`/daemons/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    deleteDaemon: (id: string) => request<void>(`/daemons/${id}`, { method: 'DELETE' }),
+        request<Daemon>(`/admin/daemons/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteDaemon: (id: string) => request<void>(`/admin/daemons/${id}`, { method: 'DELETE' }),
     pingDaemon: (data: { host: string; port: number; apiKey: string; secure?: boolean }) =>
-        request<{ online: boolean; latencyMs?: number; version?: string; system?: any; error?: string }>('/daemons/ping', { method: 'POST', body: JSON.stringify(data) }),
+        request<{ online: boolean; latencyMs?: number; version?: string; system?: any; error?: string }>('/admin/daemons/ping', { method: 'POST', body: JSON.stringify(data) }),
 
     // Allocations
     listAllocations: () => request<Allocation[]>('/allocations'),
