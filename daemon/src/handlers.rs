@@ -1665,3 +1665,199 @@ pub async fn delete_file(
 
     Ok(Json(serde_json::json!({"message": "Deleted successfully"})))
 }
+
+// ============================================================================
+// CHUNKED UPLOAD SUPPORT
+// ============================================================================
+
+use std::collections::HashMap as StdHashMap;
+use tokio::sync::Mutex;
+use once_cell::sync::Lazy;
+
+/// Storage for chunked uploads in progress on the daemon
+struct DaemonChunkUpload {
+    path: String,
+    total_chunks: u32,
+    received_chunks: StdHashMap<u32, bool>,
+    temp_dir: PathBuf,
+    created_at: std::time::Instant,
+}
+
+static DAEMON_CHUNK_STORAGE: Lazy<Mutex<StdHashMap<String, DaemonChunkUpload>>> = 
+    Lazy::new(|| Mutex::new(StdHashMap::new()));
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteChunkRequest {
+    pub upload_id: String,
+    pub chunk_index: u32,
+    pub total_chunks: u32,
+    pub path: String,
+    pub content: String, // Base64 encoded chunk
+}
+
+/// Write a single chunk to disk
+pub async fn write_file_chunk(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(container_name): Path<String>,
+    Json(req): Json<WriteChunkRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !verify_api_key(&headers, &state) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let base_path = std::env::var("FTP_BASE_PATH")
+        .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
+            .unwrap_or_else(|_| "/data/raptor".into()));
+    let container_path = std::path::Path::new(&base_path).join("volumes").join(&container_name);
+    let final_path = container_path.join(req.path.trim_start_matches('/'));
+
+    if !final_path.starts_with(&container_path) {
+        tracing::warn!("write_file_chunk: path traversal attempt blocked");
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Decode chunk content
+    use base64::Engine;
+    let chunk_data = base64::engine::general_purpose::STANDARD
+        .decode(&req.content)
+        .map_err(|e| {
+            tracing::error!("write_file_chunk: failed to decode base64: {}", e);
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let storage_key = format!("{}:{}", container_name, req.upload_id);
+    let mut storage = DAEMON_CHUNK_STORAGE.lock().await;
+
+    // Clean up old uploads (older than 30 minutes)
+    let now = std::time::Instant::now();
+    let keys_to_remove: Vec<_> = storage
+        .iter()
+        .filter(|(_, upload)| now.duration_since(upload.created_at).as_secs() > 1800)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for key in keys_to_remove {
+        if let Some(upload) = storage.remove(&key) {
+            let _ = tokio::fs::remove_dir_all(&upload.temp_dir).await;
+        }
+    }
+
+    // Create or get upload tracking
+    let temp_dir = container_path.join(".uploads").join(&req.upload_id);
+    
+    let upload = storage.entry(storage_key.clone()).or_insert_with(|| {
+        DaemonChunkUpload {
+            path: req.path.clone(),
+            total_chunks: req.total_chunks,
+            received_chunks: StdHashMap::new(),
+            temp_dir: temp_dir.clone(),
+            created_at: now,
+        }
+    });
+
+    // Ensure temp directory exists
+    if let Err(e) = tokio::fs::create_dir_all(&upload.temp_dir).await {
+        tracing::error!("write_file_chunk: failed to create temp dir: {}", e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // Write chunk to temp file
+    let chunk_file = upload.temp_dir.join(format!("chunk_{:06}", req.chunk_index));
+    if let Err(e) = tokio::fs::write(&chunk_file, &chunk_data).await {
+        tracing::error!("write_file_chunk: failed to write chunk: {}", e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    upload.received_chunks.insert(req.chunk_index, true);
+    
+    tracing::info!(
+        "write_file_chunk: received chunk {}/{} for upload {} (path: {})",
+        req.chunk_index + 1,
+        req.total_chunks,
+        req.upload_id,
+        req.path
+    );
+
+    // Check if all chunks received
+    if upload.received_chunks.len() == req.total_chunks as usize {
+        // Assemble the file
+        let temp_dir = upload.temp_dir.clone();
+        let path = upload.path.clone();
+        let total = req.total_chunks;
+        
+        // Remove from storage before assembling
+        storage.remove(&storage_key);
+        drop(storage); // Release lock
+
+        // Ensure parent directory exists
+        if let Some(parent) = final_path.parent() {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                tracing::error!("write_file_chunk: failed to create parent dirs: {}", e);
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+
+        // Create or truncate final file
+        let mut final_file = match tokio::fs::File::create(&final_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::error!("write_file_chunk: failed to create final file: {}", e);
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+
+        // Append all chunks in order
+        use tokio::io::AsyncWriteExt;
+        let mut total_bytes = 0u64;
+        for i in 0..total {
+            let chunk_file = temp_dir.join(format!("chunk_{:06}", i));
+            match tokio::fs::read(&chunk_file).await {
+                Ok(data) => {
+                    total_bytes += data.len() as u64;
+                    if let Err(e) = final_file.write_all(&data).await {
+                        tracing::error!("write_file_chunk: failed to write to final file: {}", e);
+                        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("write_file_chunk: failed to read chunk {}: {}", i, e);
+                    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            }
+        }
+
+        // Flush and sync
+        if let Err(e) = final_file.sync_all().await {
+            tracing::error!("write_file_chunk: failed to sync file: {}", e);
+        }
+
+        // Clean up temp directory
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+
+        tracing::info!(
+            "write_file_chunk: assembled file {} ({} bytes) from {} chunks",
+            path,
+            total_bytes,
+            total
+        );
+
+        return Ok(Json(serde_json::json!({
+            "message": "File uploaded successfully",
+            "complete": true,
+            "totalBytes": total_bytes
+        })));
+    }
+
+    Ok(Json(serde_json::json!({
+        "message": format!("Chunk {} of {} received", req.chunk_index + 1, req.total_chunks),
+        "complete": false,
+        "received": upload.received_chunks.len(),
+        "total": req.total_chunks
+    })))
+}
+
