@@ -3,6 +3,7 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::database_manager::DatabaseManager;
 use crate::docker::DockerManager;
 use crate::ftp::FtpServerState;
 
@@ -48,6 +49,8 @@ pub struct AppState {
     pub ftp_state: Arc<FtpServerState>,
     /// Per-container locks to serialize container operations
     pub container_locks: ContainerLocks,
+    /// Database manager for PostgreSQL, MySQL, Redis servers
+    pub database_manager: DatabaseManager,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

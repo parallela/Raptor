@@ -400,6 +400,7 @@ impl Claims {
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseServer {
     pub id: Uuid,
+    pub daemon_id: Option<Uuid>,
     pub db_type: String,
     pub container_id: Option<String>,
     pub container_name: String,
@@ -434,7 +435,7 @@ pub struct CreateDatabaseRequest {
     pub db_name: Option<String>, // Optional, will generate if not provided
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct UserDatabaseResponse {
     pub id: Uuid,
@@ -465,10 +466,11 @@ pub struct DatabaseServerResponse {
 }
 
 // Admin response that includes sensitive data
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseServerAdminResponse {
     pub id: Uuid,
+    pub daemon_id: Option<Uuid>,
     pub db_type: String,
     pub container_id: Option<String>,
     pub container_name: String,
@@ -484,8 +486,8 @@ pub struct DatabaseServerAdminResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDatabaseServerRequest {
-    pub db_type: String, // "postgresql" or "mysql"
-    pub host: String,
+    pub daemon_id: Uuid,
+    pub db_type: String, // "postgresql", "mysql", or "redis"
     pub port: i32,
     pub container_name: Option<String>,
 }

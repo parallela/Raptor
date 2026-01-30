@@ -179,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/database-servers/:id", delete(handlers::databases::delete_database_server))
         .route("/admin/database-servers/:id/start", post(handlers::databases::start_database_server))
         .route("/admin/database-servers/:id/stop", post(handlers::databases::stop_database_server))
+        .route("/admin/database-servers/:id/restart", post(handlers::databases::restart_database_server))
         .layer(axum_middleware::from_fn(require_admin));
 
     let protected_routes = Router::new()

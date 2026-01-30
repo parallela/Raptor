@@ -155,7 +155,7 @@
                 </svg>
                 Create Database
             </button>
-        {:else if availableTypes.length === 0 && !loading}
+        {:else if !loading}
             <div class="text-dark-400 text-sm">No database servers available</div>
         {/if}
     </div>
@@ -338,6 +338,22 @@
                             {db.connectionString.replace(db.dbPassword, '••••••••')}
                         </code>
                     </div>
+
+                    <!-- Redis Key Prefix Notice -->
+                    {#if db.dbType === 'redis'}
+                        <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                            <div class="flex items-start gap-2">
+                                <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div class="text-sm">
+                                    <p class="text-red-300 font-medium">Key Prefix Required</p>
+                                    <p class="text-red-400/80 mt-1">All keys must be prefixed with <code class="bg-dark-800 px-1.5 py-0.5 rounded text-red-300">{db.dbName}:</code></p>
+                                    <p class="text-dark-400 text-xs mt-2">Example: <code class="bg-dark-800 px-1.5 py-0.5 rounded">{db.dbName}:mykey</code></p>
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
 
                     <!-- Actions -->
                     <div class="flex items-center justify-between pt-2 border-t border-dark-700">

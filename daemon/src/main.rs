@@ -1,4 +1,5 @@
 mod config;
+mod database_manager;
 mod docker;
 mod ftp;
 mod handlers;
@@ -15,6 +16,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
+use crate::database_manager::DatabaseManager;
 use crate::docker::DockerManager;
 use crate::models::{AppState, ContainerLocks};
 use crate::ftp::FtpServerState;
@@ -99,12 +101,18 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("Loaded {} containers from saved state", containers_map.len());
 
+    // Initialize database manager and load state
+    let database_manager = DatabaseManager::new();
+    database_manager.load_state().await;
+    tracing::info!("Database manager initialized");
+
     let app_state = Arc::new(AppState {
         docker,
         api_key: config.daemon_api_key.clone(),
         containers: containers_map,
         ftp_state: ftp_state.clone(),
         container_locks: ContainerLocks::new(),
+        database_manager,
     });
 
     let cors = CorsLayer::new()
@@ -147,6 +155,18 @@ async fn main() -> anyhow::Result<()> {
             .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // 60MB per chunk (55MB + overhead)
         .route("/containers/:name/files/folder", post(handlers::create_folder))
         .route("/containers/:name/files/delete", delete(handlers::delete_file))
+        // Database server management
+        .route("/database-servers", get(handlers::list_database_servers))
+        .route("/database-servers", post(handlers::create_database_server))
+        .route("/database-servers/:id", get(handlers::get_database_server))
+        .route("/database-servers/:id", delete(handlers::delete_database_server))
+        .route("/database-servers/:id/start", post(handlers::start_database_server))
+        .route("/database-servers/:id/stop", post(handlers::stop_database_server))
+        .route("/database-servers/:id/restart", post(handlers::restart_database_server))
+        // User database operations (called by API)
+        .route("/database-servers/:id/databases", post(handlers::create_user_database))
+        .route("/database-servers/:id/databases", delete(handlers::delete_user_database))
+        .route("/database-servers/:id/databases/reset-password", post(handlers::reset_user_database_password))
         // Health check
         .route("/health", get(|| async { "OK" }))
         .route("/system", get(handlers::get_system_resources))

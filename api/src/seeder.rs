@@ -43,6 +43,11 @@ pub async fn run(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
         mark_executed(pool, "database_server_passwords").await?;
     }
 
+    if !was_executed(pool, "default_database_servers").await? {
+        seed_default_database_servers(pool).await?;
+        mark_executed(pool, "default_database_servers").await?;
+    }
+
     Ok(())
 }
 
@@ -242,6 +247,70 @@ async fn seed_database_server_passwords(pool: &PgPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
         tracing::info!("Generated new root password for database server {}", id);
+    }
+
+    Ok(())
+}
+
+async fn seed_default_database_servers(pool: &PgPool) -> anyhow::Result<()> {
+    // Get the first daemon to assign the database servers to (including its host)
+    let daemon: Option<(Uuid, String)> = sqlx::query_as("SELECT id, host FROM daemons LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+
+    let (daemon_id, daemon_host) = match daemon {
+        Some((id, host)) => (id, host),
+        None => {
+            tracing::warn!("No daemons found, skipping default database servers creation. Create a daemon first.");
+            return Ok(());
+        }
+    };
+
+    // Default database servers with specific ports:
+    // Redis: 63791 (6379 + 1 at end = 63791)
+    // PostgreSQL: 54321 (5432 + 1 at end = 54321)
+    // MySQL: 33061 (3306 + 1 at end = 33061)
+    let default_servers = [
+        ("redis", "raptor-redis-default", 63791),
+        ("postgresql", "raptor-postgresql-default", 54321),
+        ("mysql", "raptor-mysql-default", 33061),
+    ];
+
+    for (db_type, container_name, port) in default_servers {
+        // Check if a server of this type already exists
+        let existing: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM database_servers WHERE db_type = $1 AND container_name = $2"
+        )
+        .bind(db_type)
+        .bind(container_name)
+        .fetch_optional(pool)
+        .await?;
+
+        if existing.is_some() {
+            tracing::info!("Default {} database server already exists, skipping", db_type);
+            continue;
+        }
+
+        let root_password = generate_password(32);
+        let id = Uuid::new_v4();
+
+        sqlx::query(
+            r#"
+            INSERT INTO database_servers (id, daemon_id, db_type, container_name, host, port, root_password, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'stopped')
+            "#
+        )
+        .bind(id)
+        .bind(daemon_id)
+        .bind(db_type)
+        .bind(container_name)
+        .bind(&daemon_host)
+        .bind(port)
+        .bind(&root_password)
+        .execute(pool)
+        .await?;
+
+        tracing::info!("Created default {} database server on port {} (host: {})", db_type, port, daemon_host);
     }
 
     Ok(())

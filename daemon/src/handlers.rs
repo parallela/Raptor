@@ -20,6 +20,10 @@ use crate::models::{
     ManagedContainer,
 };
 use crate::ftp::{create_ftp_access, FtpCredentials};
+use crate::database_manager::{
+    self, CreateDatabaseServerRequest, CreateUserDatabaseRequest,
+    DatabaseServer, DeleteUserDatabaseRequest, ResetPasswordRequest,
+};
 
 // ============================================================================
 // STATE PERSISTENCE - All async, no blocking I/O
@@ -1861,3 +1865,192 @@ pub async fn write_file_chunk(
     })))
 }
 
+/// Database server handler functions
+/// These handlers manage the lifecycle of database servers (e.g., MySQL, PostgreSQL)
+/// They are separate from container handlers as databases may have different lifecycles
+
+// ============================================================================
+// DATABASE SERVER HANDLERS
+// ============================================================================
+
+pub async fn list_database_servers(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<DatabaseServer>>, StatusCode> {
+    Ok(Json(state.database_manager.list_servers()))
+}
+
+pub async fn get_database_server(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<DatabaseServer>, StatusCode> {
+    state.database_manager.get_server(&id)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+pub async fn create_database_server(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateDatabaseServerRequest>,
+) -> Result<Json<DatabaseServer>, (StatusCode, String)> {
+    let server = DatabaseServer {
+        id: req.id,
+        db_type: req.db_type,
+        container_id: None,
+        container_name: req.container_name,
+        host: req.host,
+        port: req.port,
+        root_password: req.root_password,
+        status: "stopped".to_string(),
+    };
+
+    state.database_manager.add_server(server.clone());
+    state.database_manager.save_state().await;
+
+    Ok(Json(server))
+}
+
+pub async fn delete_database_server(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    // Delete the container if it exists
+    if let Err(e) = database_manager::delete_database_container(&server).await {
+        tracing::warn!("Failed to delete database container: {}", e);
+    }
+
+    state.database_manager.remove_server(&id);
+    state.database_manager.save_state().await;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn start_database_server(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<DatabaseServer>, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    let container_id = database_manager::create_and_start_database_container(&server)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    state.database_manager.update_server_status(&id, "running", Some(container_id));
+    state.database_manager.save_state().await;
+
+    let updated_server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Failed to get updated server".to_string()))?;
+
+    Ok(Json(updated_server))
+}
+
+pub async fn stop_database_server(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<DatabaseServer>, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    database_manager::stop_database_container(&server)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    state.database_manager.update_server_status(&id, "stopped", None);
+    state.database_manager.save_state().await;
+
+    let updated_server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Failed to get updated server".to_string()))?;
+
+    Ok(Json(updated_server))
+}
+
+pub async fn restart_database_server(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<DatabaseServer>, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    // Stop first (ignore errors if not running)
+    let _ = database_manager::stop_database_container(&server).await;
+    state.database_manager.update_server_status(&id, "restarting", None);
+
+    // Start
+    let container_id = database_manager::create_and_start_database_container(&server)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    state.database_manager.update_server_status(&id, "running", Some(container_id));
+    state.database_manager.save_state().await;
+
+    let updated_server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Failed to get updated server".to_string()))?;
+
+    Ok(Json(updated_server))
+}
+
+pub async fn create_user_database(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<CreateUserDatabaseRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    if server.status != "running" {
+        return Err((StatusCode::BAD_REQUEST, "Database server is not running".to_string()));
+    }
+
+    database_manager::create_user_database(&server, &req.db_name, &req.db_user, &req.db_password)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(serde_json::json!({
+        "message": "Database created successfully"
+    })))
+}
+
+pub async fn delete_user_database(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<DeleteUserDatabaseRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    if server.status != "running" {
+        return Err((StatusCode::BAD_REQUEST, "Database server is not running".to_string()));
+    }
+
+    database_manager::delete_user_database(&server, &req.db_name, &req.db_user)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(serde_json::json!({
+        "message": "Database deleted successfully"
+    })))
+}
+
+pub async fn reset_user_database_password(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<ResetPasswordRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let server = state.database_manager.get_server(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    if server.status != "running" {
+        return Err((StatusCode::BAD_REQUEST, "Database server is not running".to_string()));
+    }
+
+    database_manager::reset_user_database_password(&server, &req.db_name, &req.db_user, &req.new_password)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(serde_json::json!({
+        "message": "Password reset successfully"
+    })))
+}

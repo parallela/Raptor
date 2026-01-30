@@ -330,7 +330,7 @@ export const api = {
     // Admin: Database servers
     listDatabaseServers: () => request<any[]>('/admin/database-servers'),
     getDatabaseServer: (id: string) => request<any>(`/admin/database-servers/${id}`),
-    createDatabaseServer: (data: { dbType: string; host: string; port: number; containerName?: string }) =>
+    createDatabaseServer: (data: { daemonId: string; dbType: string; port: number; containerName?: string }) =>
         request<any>('/admin/database-servers', { method: 'POST', body: JSON.stringify(data) }),
     updateDatabaseServer: (id: string, data: { host?: string; port?: number; regeneratePassword?: boolean }) =>
         request<any>(`/admin/database-servers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -340,6 +340,8 @@ export const api = {
         request<any>(`/admin/database-servers/${id}/start`, { method: 'POST' }),
     stopDatabaseServer: (id: string) =>
         request<any>(`/admin/database-servers/${id}/stop`, { method: 'POST' }),
+    restartDatabaseServer: (id: string) =>
+        request<any>(`/admin/database-servers/${id}/restart`, { method: 'POST' }),
 };
 
 export function createWebSocket(containerId: string): WebSocket {

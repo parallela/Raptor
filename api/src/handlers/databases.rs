@@ -1,620 +1,250 @@
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    Extension, Json,
+    extract::{Extension, Path, State},
+    Json,
 };
-use bollard::{
-    container::{Config, CreateContainerOptions, StopContainerOptions},
-    Docker,
-    image::CreateImageOptions,
-    exec::{CreateExecOptions, StartExecResults},
-};
-use futures_util::StreamExt;
 use rand::Rng;
 use uuid::Uuid;
 
-use crate::error::AppError;
-use crate::models::{
-    AppState, Claims, CreateDatabaseRequest, CreateDatabaseServerRequest,
-    DatabaseServer, DatabaseServerAdminResponse, DatabaseServerResponse,
-    UpdateDatabaseServerRequest, UserDatabase, UserDatabaseResponse
+use crate::{
+    error::{AppError, AppResult},
+    models::{
+        AppState, Claims, CreateDatabaseRequest, CreateDatabaseServerRequest,
+        DatabaseServer, DatabaseServerAdminResponse, Daemon, UpdateDatabaseServerRequest,
+        UserDatabase, UserDatabaseResponse,
+    },
 };
 
-const MAX_REDIS_DB_NUMBER: i32 = 10000;
-
-fn generate_password(length: usize) -> String {
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    (0..length)
-        .map(|_| {
-            let idx = rng.gen_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect()
+/// Create HTTP client for daemon communication
+/// Accepts self-signed certificates for internal daemon communication
+fn daemon_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-fn generate_db_identifier(user_id: &Uuid, suffix: &str) -> String {
-    let id_str = user_id.to_string().replace("-", "");
-    format!("u{}_{}", &id_str[..8], suffix)
-}
+// ============ User Database Handlers ============
 
-async fn get_docker() -> Result<Docker, AppError> {
-    Docker::connect_with_local_defaults()
-        .map_err(|e| AppError::Internal(format!("Failed to connect to Docker: {}", e)))
-}
-
-async fn ensure_database_server_running(
-    state: &AppState,
-    server: &DatabaseServer,
-) -> Result<DatabaseServer, AppError> {
-    let docker = get_docker().await?;
-
-    // Check if container exists and is running
-    if let Some(container_id) = &server.container_id {
-        match docker.inspect_container(container_id, None).await {
-            Ok(info) => {
-                if let Some(state_info) = info.state {
-                    if state_info.running.unwrap_or(false) {
-                        // Already running - return a clone
-                        return Ok(DatabaseServer {
-                            id: server.id,
-                            db_type: server.db_type.clone(),
-                            container_id: server.container_id.clone(),
-                            container_name: server.container_name.clone(),
-                            host: server.host.clone(),
-                            port: server.port,
-                            root_password: server.root_password.clone(),
-                            status: server.status.clone(),
-                            created_at: server.created_at,
-                            updated_at: server.updated_at,
-                        });
-                    }
-                }
-                // Container exists but not running - start it
-                docker
-                    .start_container::<String>(container_id, None)
-                    .await
-                    .map_err(|e| AppError::Internal(format!("Failed to start container: {}", e)))?;
-
-                // Update status in database
-                let updated = sqlx::query_as::<_, DatabaseServer>(
-                    "UPDATE database_servers SET status = 'running', updated_at = NOW() WHERE id = $1 RETURNING *"
-                )
-                .bind(server.id)
-                .fetch_one(&state.db)
-                .await?;
-
-                return Ok(updated);
-            }
-            Err(_) => {
-                // Container doesn't exist, we need to create it
-            }
-        }
-    }
-
-    // Create the container
-    let (image, env_vars, internal_port, cmd) = match server.db_type.as_str() {
-        "postgresql" => (
-            "postgres:16-alpine",
-            vec![
-                format!("POSTGRES_PASSWORD={}", server.root_password),
-                "POSTGRES_DB=postgres".to_string(),
-            ],
-            5432,
-            None,
-        ),
-        "mysql" => (
-            "mysql:8.0",
-            vec![
-                format!("MYSQL_ROOT_PASSWORD={}", server.root_password),
-            ],
-            3306,
-            None,
-        ),
-        "redis" => (
-            "redis:7-alpine",
-            vec![],
-            6379,
-            Some(vec![
-                "redis-server".to_string(),
-                "--databases".to_string(),
-                MAX_REDIS_DB_NUMBER.to_string(),
-                "--aclfile".to_string(),
-                "/data/users.acl".to_string(),
-            ]),
-        ),
-        _ => return Err(AppError::BadRequest("Invalid database type".to_string())),
-    };
-
-    // Pull image
-    tracing::info!("Pulling database image: {}", image);
-    let mut pull_stream = docker.create_image(
-        Some(CreateImageOptions {
-            from_image: image,
-            ..Default::default()
-        }),
-        None,
-        None,
-    );
-
-    while let Some(result) = pull_stream.next().await {
-        if let Err(e) = result {
-            tracing::warn!("Image pull warning: {}", e);
-        }
-    }
-
-    let container_config = Config {
-        image: Some(image.to_string()),
-        env: Some(env_vars),
-        cmd: cmd,
-        exposed_ports: Some(
-            [(format!("{}/tcp", internal_port), std::collections::HashMap::new())]
-                .into_iter()
-                .collect(),
-        ),
-        host_config: Some(bollard::service::HostConfig {
-            port_bindings: Some(
-                [(
-                    format!("{}/tcp", internal_port),
-                    Some(vec![bollard::service::PortBinding {
-                        host_ip: Some("0.0.0.0".to_string()),
-                        host_port: Some(server.port.to_string()),
-                    }]),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-            restart_policy: Some(bollard::service::RestartPolicy {
-                name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
-                ..Default::default()
-            }),
-            memory: Some(1024 * 1024 * 1024),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    // Create container
-    let container = docker
-        .create_container::<String, String>(
-            Some(CreateContainerOptions {
-                name: server.container_name.clone(),
-                platform: None,
-            }),
-            container_config,
-        )
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to create container: {}", e)))?;
-
-    // Start container
-    docker
-        .start_container::<String>(&container.id, None)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to start container: {}", e)))?;
-
-    // Update database with container ID
-    let updated = sqlx::query_as::<_, DatabaseServer>(
-        "UPDATE database_servers SET container_id = $1, status = 'running', updated_at = NOW() WHERE id = $2 RETURNING *"
-    )
-    .bind(&container.id)
-    .bind(server.id)
-    .fetch_one(&state.db)
-    .await?;
-
-    // Wait for database to be ready
-    tracing::info!("Waiting for {} to be ready...", server.db_type);
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-    Ok(updated)
-}
-
-async fn execute_db_command(
-    docker: &Docker,
-    container_id: &str,
-    db_type: &str,
-    root_password: &str,
-    command: &str,
-) -> Result<String, AppError> {
-    let cmd = match db_type {
-        "postgresql" => vec![
-            "psql".to_string(),
-            "-U".to_string(),
-            "postgres".to_string(),
-            "-c".to_string(),
-            command.to_string(),
-        ],
-        "mysql" => vec![
-            "mysql".to_string(),
-            "-u".to_string(),
-            "root".to_string(),
-            format!("-p{}", root_password),
-            "-e".to_string(),
-            command.to_string(),
-        ],
-        "redis" => {
-            let mut args = vec!["redis-cli".to_string()];
-            for part in command.split_whitespace() {
-                args.push(part.to_string());
-            }
-            args
-        }
-        _ => return Err(AppError::BadRequest("Invalid database type".to_string())),
-    };
-
-    let exec = docker
-        .create_exec(
-            container_id,
-            CreateExecOptions {
-                attach_stdout: Some(true),
-                attach_stderr: Some(true),
-                cmd: Some(cmd),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to create exec: {}", e)))?;
-
-    let output = docker
-        .start_exec(&exec.id, None)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to start exec: {}", e)))?;
-
-    let mut result = String::new();
-    if let StartExecResults::Attached { mut output, .. } = output {
-        while let Some(chunk) = output.next().await {
-            if let Ok(log) = chunk {
-                result.push_str(&log.to_string());
-            }
-        }
-    }
-
-    Ok(result)
-}
-
+/// List all databases for the current user
 pub async fn list_databases(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-) -> Result<Json<Vec<UserDatabaseResponse>>, AppError> {
-    let databases = sqlx::query_as::<_, UserDatabase>(
-        "SELECT * FROM user_databases WHERE user_id = $1 ORDER BY created_at DESC"
-    )
-    .bind(claims.sub)
-    .fetch_all(&state.db)
-    .await?;
-
-    let mut responses = Vec::new();
-    for db in databases {
-        // Get server info
-        let server = sqlx::query_as::<_, DatabaseServer>(
-            "SELECT * FROM database_servers WHERE id = $1"
-        )
-        .bind(db.server_id)
-        .fetch_optional(&state.db)
-        .await?;
-
-        if let Some(server) = server {
-            let connection_string = match db.db_type.as_str() {
-                "postgresql" => format!(
-                    "postgresql://{}:{}@{}:{}/{}",
-                    db.db_user, db.db_password, server.host, server.port, db.db_name
-                ),
-                "mysql" => format!(
-                    "mysql://{}:{}@{}:{}/{}",
-                    db.db_user, db.db_password, server.host, server.port, db.db_name
-                ),
-                "redis" => format!(
-                    "redis://{}:{}@{}:{}/{}",
-                    db.db_user, db.db_password, server.host, server.port, db.db_name
-                ),
-                _ => String::new(),
-            };
-
-            responses.push(UserDatabaseResponse {
-                id: db.id,
-                db_type: db.db_type,
-                db_name: db.db_name,
-                db_user: db.db_user,
-                db_password: db.db_password,
-                host: server.host,
-                port: server.port,
-                status: db.status,
-                connection_string,
-                created_at: db.created_at,
-            });
-        }
-    }
-
-    Ok(Json(responses))
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AvailableDatabaseType {
-    pub db_type: String,
-    pub name: String,
-    pub available: bool,
-}
-
-pub async fn get_available_database_types(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-) -> Result<Json<Vec<AvailableDatabaseType>>, AppError> {
-    let servers = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE status = 'running' ORDER BY db_type"
-    )
-    .fetch_all(&state.db)
-    .await?;
-
-    let existing_dbs: Vec<String> = sqlx::query_scalar(
-        "SELECT db_type FROM user_databases WHERE user_id = $1"
-    )
-    .bind(claims.sub)
-    .fetch_all(&state.db)
-    .await?;
-
-    let mut types = Vec::new();
-    for server in servers {
-        let name = match server.db_type.as_str() {
-            "postgresql" => "PostgreSQL",
-            "mysql" => "MySQL",
-            "redis" => "Redis",
-            _ => &server.db_type,
-        };
-        types.push(AvailableDatabaseType {
-            db_type: server.db_type.clone(),
-            name: name.to_string(),
-            available: !existing_dbs.contains(&server.db_type),
-        });
-    }
-
-    Ok(Json(types))
-}
-
-pub async fn get_database(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<UserDatabaseResponse>, AppError> {
-    let db = sqlx::query_as::<_, UserDatabase>(
-        "SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"
-    )
-    .bind(id)
-    .bind(claims.sub)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
-
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
-    )
-    .bind(db.server_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    let connection_string = match db.db_type.as_str() {
-        "postgresql" => format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            db.db_user, db.db_password, server.host, server.port, db.db_name
-        ),
-        "mysql" => format!(
-            "mysql://{}:{}@{}:{}/{}",
-            db.db_user, db.db_password, server.host, server.port, db.db_name
-        ),
-        "redis" => format!(
-            "redis://{}:{}@{}:{}/{}",
-            db.db_user, db.db_password, server.host, server.port, db.db_name
-        ),
-        _ => String::new(),
-    };
-
-    Ok(Json(UserDatabaseResponse {
-        id: db.id,
-        db_type: db.db_type,
-        db_name: db.db_name,
-        db_user: db.db_user,
-        db_password: db.db_password,
-        host: server.host,
-        port: server.port,
-        status: db.status,
-        connection_string,
-        created_at: db.created_at,
-    }))
-}
-
-pub async fn create_database(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-    Json(req): Json<CreateDatabaseRequest>,
-) -> Result<Json<UserDatabaseResponse>, AppError> {
-    // Validate db_type
-    if req.db_type != "postgresql" && req.db_type != "mysql" && req.db_type != "redis" {
-        return Err(AppError::BadRequest("Invalid database type. Use 'postgresql', 'mysql', or 'redis'".to_string()));
-    }
-
-    // Check if user already has a database of this type
-    let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_databases WHERE user_id = $1 AND db_type = $2"
-    )
-    .bind(claims.sub)
-    .bind(&req.db_type)
-    .fetch_one(&state.db)
-    .await?;
-
-    if existing > 0 {
-        return Err(AppError::BadRequest(format!("You already have a {} database", req.db_type)));
-    }
-
-    // Get the shared database server for this type
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE db_type = $1"
-    )
-    .bind(&req.db_type)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::Internal(format!("No {} server configured", req.db_type)))?;
-
-    // Ensure the shared container is running
-    let server = ensure_database_server_running(&state, &server).await?;
-
-    let container_id = server.container_id.as_ref()
-        .ok_or_else(|| AppError::Internal("Server container not available".to_string()))?;
-
-    let (db_name, db_user, db_password) = if req.db_type == "redis" {
-        let used_numbers: Vec<String> = sqlx::query_scalar(
-            "SELECT db_name FROM user_databases WHERE server_id = $1 AND db_type = 'redis'"
-        )
-        .bind(server.id)
-        .fetch_all(&state.db)
-        .await?;
-
-        let used_nums: Vec<i32> = used_numbers
-            .iter()
-            .filter_map(|n| n.parse::<i32>().ok())
-            .collect();
-
-        let mut next_db = 0;
-        for i in 0..MAX_REDIS_DB_NUMBER {
-            if !used_nums.contains(&i) {
-                next_db = i;
-                break;
-            }
-        }
-
-        if used_nums.len() >= MAX_REDIS_DB_NUMBER as usize {
-            return Err(AppError::BadRequest("All Redis database slots are in use".to_string()));
-        }
-
-        let db_user = generate_db_identifier(&claims.sub, "user");
-        let db_password = generate_password(24);
-        (next_db.to_string(), db_user, db_password)
-    } else {
-        let db_name = req.db_name.unwrap_or_else(|| generate_db_identifier(&claims.sub, "db"));
-        let db_user = generate_db_identifier(&claims.sub, "user");
-        let db_password = generate_password(24);
-        (db_name, db_user, db_password)
-    };
-
-    let docker = get_docker().await?;
-
-    // Create database and user within the shared container
-    match req.db_type.as_str() {
-        "postgresql" => {
-            // Create user
-            let create_user_cmd = format!(
-                "CREATE USER {} WITH PASSWORD '{}';",
-                db_user, db_password
-            );
-            execute_db_command(&docker, container_id, "postgresql", &server.root_password, &create_user_cmd).await?;
-
-            // Create database
-            let create_db_cmd = format!(
-                "CREATE DATABASE {} OWNER {};",
-                db_name, db_user
-            );
-            execute_db_command(&docker, container_id, "postgresql", &server.root_password, &create_db_cmd).await?;
-
-            // Grant privileges
-            let grant_cmd = format!(
-                "GRANT ALL PRIVILEGES ON DATABASE {} TO {};",
-                db_name, db_user
-            );
-            execute_db_command(&docker, container_id, "postgresql", &server.root_password, &grant_cmd).await?;
-        }
-        "mysql" => {
-            // Create database
-            let create_db_cmd = format!("CREATE DATABASE {};", db_name);
-            execute_db_command(&docker, container_id, "mysql", &server.root_password, &create_db_cmd).await?;
-
-            // Create user and grant privileges
-            let create_user_cmd = format!(
-                "CREATE USER '{}'@'%' IDENTIFIED BY '{}';",
-                db_user, db_password
-            );
-            execute_db_command(&docker, container_id, "mysql", &server.root_password, &create_user_cmd).await?;
-
-            let grant_cmd = format!(
-                "GRANT ALL PRIVILEGES ON {}.* TO '{}'@'%';",
-                db_name, db_user
-            );
-            execute_db_command(&docker, container_id, "mysql", &server.root_password, &grant_cmd).await?;
-
-            let flush_cmd = "FLUSH PRIVILEGES;";
-            execute_db_command(&docker, container_id, "mysql", &server.root_password, flush_cmd).await?;
-        }
-        "redis" => {
-            // Create ACL user locked to specific database
-            // Format: ACL SETUSER username on >password ~* +@all -select +select|N
-            let acl_cmd = format!(
-                "ACL SETUSER {} on >{} ~* +@all -select +select|{}",
-                db_user, db_password, db_name
-            );
-            execute_db_command(&docker, container_id, "redis", &server.root_password, &acl_cmd).await?;
-
-            // Save ACL to file
-            execute_db_command(&docker, container_id, "redis", &server.root_password, "ACL SAVE").await?;
-
-            tracing::info!("Created Redis user {} with access to DB {} for user {}", db_user, db_name, claims.sub);
-        }
-        _ => return Err(AppError::BadRequest("Invalid database type".to_string())),
-    }
-
-    // Save to database
-    let db_record = sqlx::query_as::<_, UserDatabase>(
+) -> AppResult<Json<Vec<UserDatabaseResponse>>> {
+    let databases: Vec<UserDatabaseResponse> = sqlx::query_as(
         r#"
-        INSERT INTO user_databases (user_id, server_id, db_type, db_name, db_user, db_password, status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'active')
-        RETURNING *
+        SELECT
+            ud.id,
+            ud.db_type,
+            ud.db_name,
+            ud.db_user,
+            ud.db_password,
+            ds.host,
+            ds.port,
+            ud.status,
+            CASE
+                WHEN ud.db_type = 'postgresql' THEN 'postgresql://' || ud.db_user || ':' || ud.db_password || '@' || ds.host || ':' || ds.port || '/' || ud.db_name
+                WHEN ud.db_type = 'mysql' THEN 'mysql://' || ud.db_user || ':' || ud.db_password || '@' || ds.host || ':' || ds.port || '/' || ud.db_name
+                WHEN ud.db_type = 'redis' THEN 'redis://' || ud.db_user || ':' || ud.db_password || '@' || ds.host || ':' || ds.port
+                ELSE ''
+            END as connection_string,
+            ud.created_at
+        FROM user_databases ud
+        JOIN database_servers ds ON ds.id = ud.server_id
+        WHERE ud.user_id = $1
+        ORDER BY ud.created_at DESC
         "#
     )
     .bind(claims.sub)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(databases))
+}
+
+/// Create a new database for the current user
+pub async fn create_database(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(payload): Json<CreateDatabaseRequest>,
+) -> AppResult<Json<UserDatabaseResponse>> {
+    // Validate db_type
+    if !["postgresql", "mysql", "redis"].contains(&payload.db_type.as_str()) {
+        return Err(AppError::BadRequest(
+            "Invalid database type. Must be 'postgresql', 'mysql', or 'redis'".to_string(),
+        ));
+    }
+
+    // Find an active database server for this type
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE db_type = $1 AND status = 'running' LIMIT 1"#
+    )
+    .bind(&payload.db_type)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::BadRequest(format!(
+            "No running {} server available",
+            payload.db_type
+        ))
+    })?;
+
+    // Get the daemon for this server
+    let daemon: Daemon = sqlx::query_as(
+        r#"SELECT * FROM daemons WHERE id = $1"#
+    )
+    .bind(server.daemon_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Internal("Database server has no daemon assigned".to_string()))?;
+
+    // Generate database name if not provided (alphanumeric only, no hyphens)
+    let db_name = payload.db_name.unwrap_or_else(|| {
+        format!(
+            "db_{}_{}",
+            claims.username.chars().filter(|c| c.is_alphanumeric()).take(8).collect::<String>(),
+            &Uuid::new_v4().to_string().replace("-", "")[..8]
+        )
+    });
+
+    // Generate random username and password (alphanumeric only, no hyphens for SQL compatibility)
+    let db_user = format!("u_{}", &Uuid::new_v4().to_string().replace("-", "")[..12]);
+    let db_password = generate_password(24);
+
+    // Call daemon to create the database
+    let client = daemon_client();
+    let daemon_url = format!("{}/database-servers/{}/databases", daemon.base_url(), server.id);
+
+    let daemon_req = serde_json::json!({
+        "serverId": server.id.to_string(),
+        "dbType": payload.db_type,
+        "dbName": db_name,
+        "dbUser": db_user,
+        "dbPassword": db_password
+    });
+
+    let res = client
+        .post(&daemon_url)
+        .header("X-API-Key", &daemon.api_key)
+        .json(&daemon_req)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Failed to connect to daemon: {}", e)))?;
+
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        return Err(AppError::Daemon(format!("Failed to create database: {}", error_text)));
+    }
+
+    // Create the user_database record
+    let id = Uuid::new_v4();
+    let database: UserDatabase = sqlx::query_as(
+        r#"
+        INSERT INTO user_databases (id, user_id, server_id, db_type, db_name, db_user, db_password, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+        RETURNING *
+        "#
+    )
+    .bind(id)
+    .bind(claims.sub)
     .bind(server.id)
-    .bind(&req.db_type)
+    .bind(&payload.db_type)
     .bind(&db_name)
     .bind(&db_user)
     .bind(&db_password)
     .fetch_one(&state.db)
     .await?;
 
-    let connection_string = match req.db_type.as_str() {
-        "postgresql" => format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            db_record.db_user, db_record.db_password, server.host, server.port, db_record.db_name
-        ),
-        "mysql" => format!(
-            "mysql://{}:{}@{}:{}/{}",
-            db_record.db_user, db_record.db_password, server.host, server.port, db_record.db_name
-        ),
-        "redis" => format!(
-            "redis://{}:{}@{}:{}/{}",
-            db_record.db_user, db_record.db_password, server.host, server.port, db_record.db_name
-        ),
-        _ => String::new(),
-    };
-
-    tracing::info!("Created {} database '{}' for user {}", req.db_type, db_name, claims.sub);
+    // Build response
+    let connection_string = build_connection_string(
+        &database.db_type,
+        &database.db_user,
+        &database.db_password,
+        &server.host,
+        server.port,
+        &database.db_name,
+    );
 
     Ok(Json(UserDatabaseResponse {
-        id: db_record.id,
-        db_type: db_record.db_type,
-        db_name: db_record.db_name,
-        db_user: db_record.db_user,
-        db_password: db_record.db_password,
+        id: database.id,
+        db_type: database.db_type,
+        db_name: database.db_name,
+        db_user: database.db_user,
+        db_password: database.db_password,
         host: server.host,
         port: server.port,
-        status: db_record.status,
+        status: database.status,
         connection_string,
-        created_at: db_record.created_at,
+        created_at: database.created_at,
     }))
 }
 
-pub async fn delete_database(
+/// Get available database types (servers that are running)
+pub async fn get_available_database_types(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+) -> AppResult<Json<Vec<serde_json::Value>>> {
+    // Get all possible database types
+    let all_types = vec!["postgresql", "mysql", "redis"];
+
+    // Get running database types
+    let rows: Vec<(String,)> = sqlx::query_as(
+        r#"SELECT DISTINCT db_type FROM database_servers WHERE status = 'running'"#
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let running_types: Vec<String> = rows.into_iter().map(|(t,)| t).collect();
+
+    // Build response with availability info
+    let result: Vec<serde_json::Value> = all_types
+        .iter()
+        .map(|t| {
+            let name = match *t {
+                "postgresql" => "PostgreSQL",
+                "mysql" => "MySQL",
+                "redis" => "Redis",
+                _ => *t,
+            };
+            serde_json::json!({
+                "dbType": t,
+                "name": name,
+                "available": running_types.contains(&t.to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(result))
+}
+
+/// Get a specific database by ID
+pub async fn get_database(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
-    // Get the database record
-    let db = sqlx::query_as::<_, UserDatabase>(
-        "SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"
+) -> AppResult<Json<UserDatabaseResponse>> {
+    let database: UserDatabaseResponse = sqlx::query_as(
+        r#"
+        SELECT
+            ud.id,
+            ud.db_type,
+            ud.db_name,
+            ud.db_user,
+            ud.db_password,
+            ds.host,
+            ds.port,
+            ud.status,
+            CASE
+                WHEN ud.db_type = 'postgresql' THEN 'postgresql://' || ud.db_user || ':' || ud.db_password || '@' || ds.host || ':' || ds.port || '/' || ud.db_name
+                WHEN ud.db_type = 'mysql' THEN 'mysql://' || ud.db_user || ':' || ud.db_password || '@' || ds.host || ':' || ds.port || '/' || ud.db_name
+                WHEN ud.db_type = 'redis' THEN 'redis://' || ud.db_user || ':' || ud.db_password || '@' || ds.host || ':' || ds.port
+                ELSE ''
+            END as connection_string,
+            ud.created_at
+        FROM user_databases ud
+        JOIN database_servers ds ON ds.id = ud.server_id
+        WHERE ud.id = $1 AND ud.user_id = $2
+        "#
     )
     .bind(id)
     .bind(claims.sub)
@@ -622,200 +252,84 @@ pub async fn delete_database(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Get the server
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
+    Ok(Json(database))
+}
+
+/// Delete a database
+pub async fn delete_database(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Verify ownership and get database info
+    let database: UserDatabase = sqlx::query_as(
+        r#"SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"#
     )
-    .bind(db.server_id)
+    .bind(id)
+    .bind(claims.sub)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    // Get server and daemon info
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
+    )
+    .bind(database.server_id)
     .fetch_one(&state.db)
     .await?;
 
-    if let Some(container_id) = &server.container_id {
-        let docker = get_docker().await?;
+    if let Some(daemon_id) = server.daemon_id {
+        let daemon: Option<Daemon> = sqlx::query_as(
+            r#"SELECT * FROM daemons WHERE id = $1"#
+        )
+        .bind(daemon_id)
+        .fetch_optional(&state.db)
+        .await?;
 
-        match db.db_type.as_str() {
-            "postgresql" => {
-                let terminate_cmd = format!(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{}';",
-                    db.db_name
-                );
-                let _ = execute_db_command(&docker, container_id, "postgresql", &server.root_password, &terminate_cmd).await;
+        // Call daemon to delete the database
+        if let Some(daemon) = daemon {
+            let client = daemon_client();
+            let daemon_url = format!("{}/database-servers/{}/databases", daemon.base_url(), server.id);
 
-                let drop_db_cmd = format!("DROP DATABASE IF EXISTS {};", db.db_name);
-                let _ = execute_db_command(&docker, container_id, "postgresql", &server.root_password, &drop_db_cmd).await;
+            let daemon_req = serde_json::json!({
+                "serverId": server.id.to_string(),
+                "dbType": database.db_type,
+                "dbName": database.db_name,
+                "dbUser": database.db_user
+            });
 
-                let drop_user_cmd = format!("DROP USER IF EXISTS {};", db.db_user);
-                let _ = execute_db_command(&docker, container_id, "postgresql", &server.root_password, &drop_user_cmd).await;
+            let res = client
+                .delete(&daemon_url)
+                .header("X-API-Key", &daemon.api_key)
+                .json(&daemon_req)
+                .send()
+                .await;
+
+            if let Err(e) = res {
+                tracing::warn!("Failed to delete database from daemon: {}", e);
             }
-            "mysql" => {
-                let drop_db_cmd = format!("DROP DATABASE IF EXISTS {};", db.db_name);
-                let _ = execute_db_command(&docker, container_id, "mysql", &server.root_password, &drop_db_cmd).await;
-
-                let drop_user_cmd = format!("DROP USER IF EXISTS '{}'@'%';", db.db_user);
-                let _ = execute_db_command(&docker, container_id, "mysql", &server.root_password, &drop_user_cmd).await;
-            }
-            "redis" => {
-                let del_user_cmd = format!("ACL DELUSER {}", db.db_user);
-                let _ = execute_db_command(&docker, container_id, "redis", &server.root_password, &del_user_cmd).await;
-                let _ = execute_db_command(&docker, container_id, "redis", &server.root_password, "ACL SAVE").await;
-            }
-            _ => {}
         }
     }
 
     // Delete from database
     sqlx::query("DELETE FROM user_databases WHERE id = $1")
-        .bind(id)
+        .bind(database.id)
         .execute(&state.db)
         .await?;
 
-    tracing::info!("Deleted {} database '{}' for user {}", db.db_type, db.db_name, claims.sub);
-
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(serde_json::json!({ "message": "Database deleted" })))
 }
 
-pub async fn list_database_servers(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-) -> Result<Json<Vec<DatabaseServerResponse>>, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    let servers = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers ORDER BY db_type"
-    )
-    .fetch_all(&state.db)
-    .await?;
-
-    let mut responses = Vec::new();
-    for server in servers {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM user_databases WHERE server_id = $1"
-        )
-        .bind(server.id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(0);
-
-        responses.push(DatabaseServerResponse {
-            id: server.id,
-            db_type: server.db_type,
-            container_id: server.container_id,
-            container_name: server.container_name,
-            host: server.host,
-            port: server.port,
-            status: server.status,
-            database_count: count,
-            created_at: server.created_at,
-            updated_at: server.updated_at,
-        });
-    }
-
-    Ok(Json(responses))
-}
-
-pub async fn start_database_server(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<DatabaseServerResponse>, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
-
-    let updated = ensure_database_server_running(&state, &server).await?;
-
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_databases WHERE server_id = $1"
-    )
-    .bind(updated.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
-
-    Ok(Json(DatabaseServerResponse {
-        id: updated.id,
-        db_type: updated.db_type,
-        container_id: updated.container_id,
-        container_name: updated.container_name,
-        host: updated.host,
-        port: updated.port,
-        status: updated.status,
-        database_count: count,
-        created_at: updated.created_at,
-        updated_at: updated.updated_at,
-    }))
-}
-
-pub async fn stop_database_server(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<DatabaseServerResponse>, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
-
-    if let Some(container_id) = &server.container_id {
-        let docker = get_docker().await?;
-        let _ = docker
-            .stop_container(container_id, Some(StopContainerOptions { t: 30 }))
-            .await;
-    }
-
-    let updated = sqlx::query_as::<_, DatabaseServer>(
-        "UPDATE database_servers SET status = 'stopped', updated_at = NOW() WHERE id = $1 RETURNING *"
-    )
-    .bind(id)
-    .fetch_one(&state.db)
-    .await?;
-
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_databases WHERE server_id = $1"
-    )
-    .bind(updated.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
-
-    Ok(Json(DatabaseServerResponse {
-        id: updated.id,
-        db_type: updated.db_type,
-        container_id: updated.container_id,
-        container_name: updated.container_name,
-        host: updated.host,
-        port: updated.port,
-        status: updated.status,
-        database_count: count,
-        created_at: updated.created_at,
-        updated_at: updated.updated_at,
-    }))
-}
-
+/// Reset database password
 pub async fn reset_database_password(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
-) -> Result<Json<UserDatabaseResponse>, AppError> {
-    let db = sqlx::query_as::<_, UserDatabase>(
-        "SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"
+) -> AppResult<Json<UserDatabaseResponse>> {
+    // Verify ownership
+    let database: UserDatabase = sqlx::query_as(
+        r#"SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"#
     )
     .bind(id)
     .bind(claims.sub)
@@ -823,64 +337,77 @@ pub async fn reset_database_password(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
+    // Get server info
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
     )
-    .bind(db.server_id)
+    .bind(database.server_id)
     .fetch_one(&state.db)
     .await?;
 
+    // Generate new password
     let new_password = generate_password(24);
 
-    if let Some(container_id) = &server.container_id {
-        let docker = get_docker().await?;
+    // Call daemon to reset password if server is running
+    if server.status == "running" {
+        if let Some(daemon_id) = server.daemon_id {
+            let daemon: Option<Daemon> = sqlx::query_as(
+                r#"SELECT * FROM daemons WHERE id = $1"#
+            )
+            .bind(daemon_id)
+            .fetch_optional(&state.db)
+            .await?;
 
-        match db.db_type.as_str() {
-            "postgresql" => {
-                let cmd = format!("ALTER USER {} WITH PASSWORD '{}';", db.db_user, new_password);
-                execute_db_command(&docker, container_id, "postgresql", &server.root_password, &cmd).await?;
+            if let Some(daemon) = daemon {
+                let client = daemon_client();
+                let daemon_url = format!("{}/database-servers/{}/databases/reset-password", daemon.base_url(), server.id);
+
+                let daemon_req = serde_json::json!({
+                    "serverId": server.id.to_string(),
+                    "dbType": database.db_type,
+                    "dbName": database.db_name,
+                    "dbUser": database.db_user,
+                    "newPassword": new_password
+                });
+
+                let res = client
+                    .post(&daemon_url)
+                    .header("X-API-Key", &daemon.api_key)
+                    .json(&daemon_req)
+                    .send()
+                    .await
+                    .map_err(|e| AppError::Daemon(format!("Failed to connect to daemon: {}", e)))?;
+
+                if !res.status().is_success() {
+                    let error_text = res.text().await.unwrap_or_default();
+                    return Err(AppError::Daemon(format!("Failed to reset password: {}", error_text)));
+                }
             }
-            "mysql" => {
-                let cmd = format!("ALTER USER '{}'@'%' IDENTIFIED BY '{}';", db.db_user, new_password);
-                execute_db_command(&docker, container_id, "mysql", &server.root_password, &cmd).await?;
-                execute_db_command(&docker, container_id, "mysql", &server.root_password, "FLUSH PRIVILEGES;").await?;
-            }
-            "redis" => {
-                // Update Redis ACL user password
-                let acl_cmd = format!(
-                    "ACL SETUSER {} on >{} ~* +@all -select +select|{}",
-                    db.db_user, new_password, db.db_name
-                );
-                execute_db_command(&docker, container_id, "redis", &server.root_password, &acl_cmd).await?;
-                execute_db_command(&docker, container_id, "redis", &server.root_password, "ACL SAVE").await?;
-            }
-            _ => {}
         }
     }
 
-    let updated = sqlx::query_as::<_, UserDatabase>(
-        "UPDATE user_databases SET db_password = $1, updated_at = NOW() WHERE id = $2 RETURNING *"
+    // Update the password in API database
+    let updated: UserDatabase = sqlx::query_as(
+        r#"
+        UPDATE user_databases
+        SET db_password = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING *
+        "#
     )
     .bind(&new_password)
-    .bind(id)
+    .bind(database.id)
     .fetch_one(&state.db)
     .await?;
 
-    let connection_string = match updated.db_type.as_str() {
-        "postgresql" => format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            updated.db_user, updated.db_password, server.host, server.port, updated.db_name
-        ),
-        "mysql" => format!(
-            "mysql://{}:{}@{}:{}/{}",
-            updated.db_user, updated.db_password, server.host, server.port, updated.db_name
-        ),
-        "redis" => format!(
-            "redis://{}:{}@{}:{}/{}",
-            updated.db_user, updated.db_password, server.host, server.port, updated.db_name
-        ),
-        _ => String::new(),
-    };
+    let connection_string = build_connection_string(
+        &updated.db_type,
+        &updated.db_user,
+        &updated.db_password,
+        &server.host,
+        server.port,
+        &updated.db_name,
+    );
 
     Ok(Json(UserDatabaseResponse {
         id: updated.id,
@@ -896,95 +423,120 @@ pub async fn reset_database_password(
     }))
 }
 
-pub async fn get_database_server(
+// ============ Admin Database Server Handlers ============
+
+/// List all database servers (admin only)
+pub async fn list_database_servers(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<DatabaseServerAdminResponse>, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
+    Extension(_claims): Extension<Claims>,
+) -> AppResult<Json<Vec<DatabaseServerAdminResponse>>> {
+    let servers: Vec<DatabaseServerAdminResponse> = sqlx::query_as(
+        r#"
+        SELECT
+            ds.id,
+            ds.daemon_id,
+            ds.db_type,
+            ds.container_id,
+            ds.container_name,
+            ds.host,
+            ds.port,
+            ds.root_password,
+            ds.status,
+            COALESCE((SELECT COUNT(*) FROM user_databases WHERE server_id = ds.id), 0) as database_count,
+            ds.created_at,
+            ds.updated_at
+        FROM database_servers ds
+        ORDER BY ds.created_at DESC
+        "#
     )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
-
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_databases WHERE server_id = $1"
-    )
-    .bind(server.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
-
-    Ok(Json(DatabaseServerAdminResponse {
-        id: server.id,
-        db_type: server.db_type,
-        container_id: server.container_id,
-        container_name: server.container_name,
-        host: server.host,
-        port: server.port,
-        root_password: server.root_password,
-        status: server.status,
-        database_count: count,
-        created_at: server.created_at,
-        updated_at: server.updated_at,
-    }))
-}
-
-pub async fn create_database_server(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-    Json(req): Json<CreateDatabaseServerRequest>,
-) -> Result<Json<DatabaseServerAdminResponse>, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    if req.db_type != "postgresql" && req.db_type != "mysql" && req.db_type != "redis" {
-        return Err(AppError::BadRequest("Invalid database type. Use 'postgresql', 'mysql', or 'redis'".to_string()));
-    }
-
-    let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM database_servers WHERE db_type = $1"
-    )
-    .bind(&req.db_type)
-    .fetch_one(&state.db)
+    .fetch_all(&state.db)
     .await?;
 
-    if existing > 0 {
-        return Err(AppError::BadRequest(format!("A {} server already exists", req.db_type)));
+    Ok(Json(servers))
+}
+
+/// Create a new database server (admin only)
+pub async fn create_database_server(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Json(payload): Json<CreateDatabaseServerRequest>,
+) -> AppResult<Json<DatabaseServerAdminResponse>> {
+    // Validate db_type
+    if !["postgresql", "mysql", "redis"].contains(&payload.db_type.as_str()) {
+        return Err(AppError::BadRequest(
+            "Invalid database type. Must be 'postgresql', 'mysql', or 'redis'".to_string(),
+        ));
     }
 
-    let container_name = req.container_name.unwrap_or_else(|| {
-        format!("raptor-{}", req.db_type)
+    // Verify daemon exists
+    let daemon: Daemon = sqlx::query_as(
+        r#"SELECT * FROM daemons WHERE id = $1"#
+    )
+    .bind(payload.daemon_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Daemon not found".to_string()))?;
+
+    // Generate container name if not provided
+    let container_name = payload.container_name.unwrap_or_else(|| {
+        format!("raptor-{}-{}", payload.db_type, &Uuid::new_v4().to_string()[..8])
     });
 
+    // Generate root password
     let root_password = generate_password(32);
 
-    let server = sqlx::query_as::<_, DatabaseServer>(
+    // Use daemon's host as the database host (where users will connect to)
+    let db_host = daemon.host.clone();
+
+    let id = Uuid::new_v4();
+
+    // Create the server in daemon
+    let client = daemon_client();
+    let daemon_url = format!("{}/database-servers", daemon.base_url());
+
+    let daemon_req = serde_json::json!({
+        "id": id.to_string(),
+        "dbType": payload.db_type,
+        "containerName": container_name,
+        "host": db_host,
+        "port": payload.port,
+        "rootPassword": root_password
+    });
+
+    let res = client
+        .post(&daemon_url)
+        .header("X-API-Key", &daemon.api_key)
+        .json(&daemon_req)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Failed to connect to daemon: {}", e)))?;
+
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        return Err(AppError::Daemon(format!("Failed to create database server: {}", error_text)));
+    }
+
+    // Save to API database
+    let server: DatabaseServer = sqlx::query_as(
         r#"
-        INSERT INTO database_servers (db_type, container_name, host, port, root_password, status)
-        VALUES ($1, $2, $3, $4, $5, 'stopped')
+        INSERT INTO database_servers (id, daemon_id, db_type, container_name, host, port, root_password, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'stopped')
         RETURNING *
         "#
     )
-    .bind(&req.db_type)
+    .bind(id)
+    .bind(payload.daemon_id)
+    .bind(&payload.db_type)
     .bind(&container_name)
-    .bind(&req.host)
-    .bind(req.port)
+    .bind(&db_host)
+    .bind(payload.port)
     .bind(&root_password)
     .fetch_one(&state.db)
     .await?;
 
-    tracing::info!("Created {} database server", req.db_type);
-
     Ok(Json(DatabaseServerAdminResponse {
         id: server.id,
+        daemon_id: server.daemon_id,
         db_type: server.db_type,
         container_id: server.container_id,
         container_name: server.container_name,
@@ -998,83 +550,261 @@ pub async fn create_database_server(
     }))
 }
 
-pub async fn update_database_server(
+/// Get a specific database server (admin only)
+pub async fn get_database_server(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateDatabaseServerRequest>,
-) -> Result<Json<DatabaseServerAdminResponse>, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
+) -> AppResult<Json<DatabaseServerAdminResponse>> {
+    let server: DatabaseServerAdminResponse = sqlx::query_as(
+        r#"
+        SELECT
+            ds.id,
+            ds.daemon_id,
+            ds.db_type,
+            ds.container_id,
+            ds.container_name,
+            ds.host,
+            ds.port,
+            ds.root_password,
+            ds.status,
+            COALESCE((SELECT COUNT(*) FROM user_databases WHERE server_id = ds.id), 0) as database_count,
+            ds.created_at,
+            ds.updated_at
+        FROM database_servers ds
+        WHERE ds.id = $1
+        "#
     )
     .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let new_host = req.host.unwrap_or(server.host.clone());
-    let new_port = req.port.unwrap_or(server.port);
+    Ok(Json(server))
+}
 
-    // Handle password regeneration
-    let new_password = if req.regenerate_password.unwrap_or(false) {
-        let password = generate_password(32);
+/// Update a database server (admin only)
+pub async fn update_database_server(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateDatabaseServerRequest>,
+) -> AppResult<Json<DatabaseServerAdminResponse>> {
+    // Check if server exists
+    let existing: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
 
-        // If the container is running, update the password in the database
-        if server.status == "running" {
-            if let Some(container_id) = &server.container_id {
-                let docker = get_docker().await?;
-
-                match server.db_type.as_str() {
-                    "postgresql" => {
-                        let cmd = format!("ALTER USER postgres WITH PASSWORD '{}';", password);
-                        execute_db_command(&docker, container_id, "postgresql", &server.root_password, &cmd).await?;
-                    }
-                    "mysql" => {
-                        let cmd = format!("ALTER USER 'root'@'%' IDENTIFIED BY '{}';", password);
-                        execute_db_command(&docker, container_id, "mysql", &server.root_password, &cmd).await?;
-                        execute_db_command(&docker, container_id, "mysql", &server.root_password, "FLUSH PRIVILEGES;").await?;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        password
+    let new_host = payload.host.unwrap_or(existing.host);
+    let new_port = payload.port.unwrap_or(existing.port);
+    let new_password = if payload.regenerate_password.unwrap_or(false) {
+        generate_password(32)
     } else {
-        server.root_password.clone()
+        existing.root_password
     };
 
-    let updated = sqlx::query_as::<_, DatabaseServer>(
+    let server: DatabaseServer = sqlx::query_as(
         r#"
         UPDATE database_servers
-        SET host = $1, port = $2, root_password = $3, updated_at = NOW()
-        WHERE id = $4
+        SET host = $2, port = $3, root_password = $4, updated_at = NOW()
+        WHERE id = $1
         RETURNING *
         "#
     )
+    .bind(id)
     .bind(&new_host)
     .bind(new_port)
     .bind(&new_password)
+    .fetch_one(&state.db)
+    .await?;
+
+    let database_count: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM user_databases WHERE server_id = $1"#
+    )
     .bind(id)
     .fetch_one(&state.db)
     .await?;
 
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_databases WHERE server_id = $1"
-    )
-    .bind(updated.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    Ok(Json(DatabaseServerAdminResponse {
+        id: server.id,
+        daemon_id: server.daemon_id,
+        db_type: server.db_type,
+        container_id: server.container_id,
+        container_name: server.container_name,
+        host: server.host,
+        port: server.port,
+        root_password: server.root_password,
+        status: server.status,
+        database_count: database_count.0,
+        created_at: server.created_at,
+        updated_at: server.updated_at,
+    }))
+}
 
-    tracing::info!("Updated {} database server", updated.db_type);
+/// Delete a database server (admin only)
+pub async fn delete_database_server(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Check if server has databases
+    let count: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM user_databases WHERE server_id = $1"#
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+
+    if count.0 > 0 {
+        return Err(AppError::BadRequest(format!(
+            "Cannot delete server with {} existing databases",
+            count.0
+        )));
+    }
+
+    // Get server to find daemon
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    // Delete from daemon
+    if let Some(daemon_id) = server.daemon_id {
+        let daemon: Option<Daemon> = sqlx::query_as(
+            r#"SELECT * FROM daemons WHERE id = $1"#
+        )
+        .bind(daemon_id)
+        .fetch_optional(&state.db)
+        .await?;
+
+        if let Some(daemon) = daemon {
+            let client = daemon_client();
+            let daemon_url = format!("{}/database-servers/{}", daemon.base_url(), id);
+
+            let res = client
+                .delete(&daemon_url)
+                .header("X-API-Key", &daemon.api_key)
+                .send()
+                .await;
+
+            if let Err(e) = res {
+                tracing::warn!("Failed to delete database server from daemon: {}", e);
+            }
+        }
+    }
+
+    let result = sqlx::query("DELETE FROM database_servers WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(serde_json::json!({ "message": "Database server deleted" })))
+}
+
+/// Start a database server (admin only)
+pub async fn start_database_server(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<DatabaseServerAdminResponse>> {
+    // Get the server
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    // Get daemon
+    let daemon: Daemon = sqlx::query_as(
+        r#"SELECT * FROM daemons WHERE id = $1"#
+    )
+    .bind(server.daemon_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Database server has no daemon assigned".to_string()))?;
+
+    let client = daemon_client();
+
+    // First, ensure the server exists in the daemon by trying to create it
+    // (the daemon will handle if it already exists)
+    let create_url = format!("{}/database-servers", daemon.base_url());
+    let create_req = serde_json::json!({
+        "id": server.id.to_string(),
+        "dbType": server.db_type,
+        "containerName": server.container_name,
+        "host": server.host,
+        "port": server.port,
+        "rootPassword": server.root_password
+    });
+
+    // Try to create - ignore errors if already exists
+    let _ = client
+        .post(&create_url)
+        .header("X-API-Key", &daemon.api_key)
+        .json(&create_req)
+        .send()
+        .await;
+
+    // Now call daemon to start the container
+    let daemon_url = format!("{}/database-servers/{}/start", daemon.base_url(), id);
+
+    let res = client
+        .post(&daemon_url)
+        .header("X-API-Key", &daemon.api_key)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Failed to connect to daemon: {}", e)))?;
+
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        return Err(AppError::Daemon(format!("Failed to start database server: {}", error_text)));
+    }
+
+    // Get updated server info from daemon response
+    let daemon_response: serde_json::Value = res.json().await
+        .map_err(|e| AppError::Daemon(format!("Failed to parse daemon response: {}", e)))?;
+
+    let container_id = daemon_response.get("containerId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Update status in API database
+    let updated: DatabaseServer = sqlx::query_as(
+        r#"
+        UPDATE database_servers
+        SET status = 'running', container_id = COALESCE($2, container_id), updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        "#
+    )
+    .bind(id)
+    .bind(container_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    let database_count: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM user_databases WHERE server_id = $1"#
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
 
     Ok(Json(DatabaseServerAdminResponse {
         id: updated.id,
+        daemon_id: updated.daemon_id,
         db_type: updated.db_type,
         container_id: updated.container_id,
         container_name: updated.container_name,
@@ -1082,67 +812,261 @@ pub async fn update_database_server(
         port: updated.port,
         root_password: updated.root_password,
         status: updated.status,
-        database_count: count,
+        database_count: database_count.0,
         created_at: updated.created_at,
         updated_at: updated.updated_at,
     }))
 }
 
-pub async fn delete_database_server(
+/// Stop a database server (admin only)
+pub async fn stop_database_server(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
-    if !claims.is_admin() {
-        return Err(AppError::Forbidden("Admin access required".to_string()));
-    }
-
-    let server = sqlx::query_as::<_, DatabaseServer>(
-        "SELECT * FROM database_servers WHERE id = $1"
+) -> AppResult<Json<DatabaseServerAdminResponse>> {
+    // Get the server
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
     )
     .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Check if there are any user databases
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_databases WHERE server_id = $1"
+    // Get daemon
+    let daemon: Daemon = sqlx::query_as(
+        r#"SELECT * FROM daemons WHERE id = $1"#
+    )
+    .bind(server.daemon_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Database server has no daemon assigned".to_string()))?;
+
+    let client = daemon_client();
+
+    // First, ensure the server exists in the daemon by trying to create it
+    let create_url = format!("{}/database-servers", daemon.base_url());
+    let create_req = serde_json::json!({
+        "id": server.id.to_string(),
+        "dbType": server.db_type,
+        "containerName": server.container_name,
+        "host": server.host,
+        "port": server.port,
+        "rootPassword": server.root_password
+    });
+
+    // Try to create - ignore errors if already exists
+    let _ = client
+        .post(&create_url)
+        .header("X-API-Key", &daemon.api_key)
+        .json(&create_req)
+        .send()
+        .await;
+
+    // Call daemon to stop the container
+    let daemon_url = format!("{}/database-servers/{}/stop", daemon.base_url(), id);
+
+    let res = client
+        .post(&daemon_url)
+        .header("X-API-Key", &daemon.api_key)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Failed to connect to daemon: {}", e)))?;
+
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        return Err(AppError::Daemon(format!("Failed to stop database server: {}", error_text)));
+    }
+
+    // Update status in API database
+    let updated: DatabaseServer = sqlx::query_as(
+        r#"
+        UPDATE database_servers
+        SET status = 'stopped', updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        "#
     )
     .bind(id)
     .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    .await?;
 
-    if count > 0 {
-        return Err(AppError::BadRequest(format!(
-            "Cannot delete server with {} active databases. Delete them first.",
-            count
-        )));
-    }
+    let database_count: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM user_databases WHERE server_id = $1"#
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
 
-    // Stop and remove the container if it exists
-    if let Some(container_id) = &server.container_id {
-        let docker = get_docker().await?;
+    Ok(Json(DatabaseServerAdminResponse {
+        id: updated.id,
+        daemon_id: updated.daemon_id,
+        db_type: updated.db_type,
+        container_id: updated.container_id,
+        container_name: updated.container_name,
+        host: updated.host,
+        port: updated.port,
+        root_password: updated.root_password,
+        status: updated.status,
+        database_count: database_count.0,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at,
+    }))
+}
 
-        // Stop container
-        let _ = docker
-            .stop_container(container_id, Some(StopContainerOptions { t: 30 }))
-            .await;
+/// Restart a database server (admin only)
+pub async fn restart_database_server(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<DatabaseServerAdminResponse>> {
+    // Get the server
+    let server: DatabaseServer = sqlx::query_as(
+        r#"SELECT * FROM database_servers WHERE id = $1"#
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
 
-        // Remove container
-        let _ = docker
-            .remove_container(container_id, None)
-            .await;
-    }
+    // Get daemon
+    let daemon: Daemon = sqlx::query_as(
+        r#"SELECT * FROM daemons WHERE id = $1"#
+    )
+    .bind(server.daemon_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Database server has no daemon assigned".to_string()))?;
 
-    sqlx::query("DELETE FROM database_servers WHERE id = $1")
+    // Update status to restarting
+    sqlx::query(
+        r#"UPDATE database_servers SET status = 'restarting', updated_at = NOW() WHERE id = $1"#
+    )
+    .bind(id)
+    .execute(&state.db)
+    .await?;
+
+    let client = daemon_client();
+
+    // First, ensure the server exists in the daemon by trying to create it
+    let create_url = format!("{}/database-servers", daemon.base_url());
+    let create_req = serde_json::json!({
+        "id": server.id.to_string(),
+        "dbType": server.db_type,
+        "containerName": server.container_name,
+        "host": server.host,
+        "port": server.port,
+        "rootPassword": server.root_password
+    });
+
+    // Try to create - ignore errors if already exists
+    let _ = client
+        .post(&create_url)
+        .header("X-API-Key", &daemon.api_key)
+        .json(&create_req)
+        .send()
+        .await;
+
+    // Call daemon to restart the container
+    let daemon_url = format!("{}/database-servers/{}/restart", daemon.base_url(), id);
+
+    let res = client
+        .post(&daemon_url)
+        .header("X-API-Key", &daemon.api_key)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Failed to connect to daemon: {}", e)))?;
+
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        // Revert status on failure
+        sqlx::query(
+            r#"UPDATE database_servers SET status = 'error', updated_at = NOW() WHERE id = $1"#
+        )
         .bind(id)
         .execute(&state.db)
         .await?;
+        return Err(AppError::Daemon(format!("Failed to restart database server: {}", error_text)));
+    }
 
-    tracing::info!("Deleted {} database server", server.db_type);
+    // Get updated server info from daemon response
+    let daemon_response: serde_json::Value = res.json().await
+        .map_err(|e| AppError::Daemon(format!("Failed to parse daemon response: {}", e)))?;
 
-    Ok(StatusCode::NO_CONTENT)
+    let container_id = daemon_response.get("containerId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Update status in API database
+    let updated: DatabaseServer = sqlx::query_as(
+        r#"
+        UPDATE database_servers
+        SET status = 'running', container_id = COALESCE($2, container_id), updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        "#
+    )
+    .bind(id)
+    .bind(container_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    let database_count: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM user_databases WHERE server_id = $1"#
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(DatabaseServerAdminResponse {
+        id: updated.id,
+        daemon_id: updated.daemon_id,
+        db_type: updated.db_type,
+        container_id: updated.container_id,
+        container_name: updated.container_name,
+        host: updated.host,
+        port: updated.port,
+        root_password: updated.root_password,
+        status: updated.status,
+        database_count: database_count.0,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at,
+    }))
 }
 
+// ============ Helper Functions ============
+
+fn generate_password(length: usize) -> String {
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut rng = rand::thread_rng();
+    (0..length)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+fn build_connection_string(
+    db_type: &str,
+    db_user: &str,
+    db_password: &str,
+    host: &str,
+    port: i32,
+    db_name: &str,
+) -> String {
+    match db_type {
+        "postgresql" => format!(
+            "postgresql://{}:{}@{}:{}/{}",
+            db_user, db_password, host, port, db_name
+        ),
+        "mysql" => format!(
+            "mysql://{}:{}@{}:{}/{}",
+            db_user, db_password, host, port, db_name
+        ),
+        // Redis uses ACL with key prefix isolation: all keys must be prefixed with "db_name:"
+        // Connection: redis://username:password@host:port
+        "redis" => format!("redis://{}:{}@{}:{}", db_user, db_password, host, port),
+        _ => String::new(),
+    }
+}
