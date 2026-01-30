@@ -395,3 +395,105 @@ impl Claims {
     }
 }
 
+// Shared Database Server (PostgreSQL or MySQL container)
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseServer {
+    pub id: Uuid,
+    pub db_type: String,
+    pub container_id: Option<String>,
+    pub container_name: String,
+    pub host: String,
+    pub port: i32,
+    pub root_password: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+// User database instances (databases within shared containers)
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct UserDatabase {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub server_id: Uuid,
+    pub db_type: String,
+    pub db_name: String,
+    pub db_user: String,
+    pub db_password: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDatabaseRequest {
+    pub db_type: String, // "postgresql" or "mysql"
+    pub db_name: Option<String>, // Optional, will generate if not provided
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserDatabaseResponse {
+    pub id: Uuid,
+    pub db_type: String,
+    pub db_name: String,
+    pub db_user: String,
+    pub db_password: String,
+    pub host: String,
+    pub port: i32,
+    pub status: String,
+    pub connection_string: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseServerResponse {
+    pub id: Uuid,
+    pub db_type: String,
+    pub container_id: Option<String>,
+    pub container_name: String,
+    pub host: String,
+    pub port: i32,
+    pub status: String,
+    pub database_count: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+// Admin response that includes sensitive data
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseServerAdminResponse {
+    pub id: Uuid,
+    pub db_type: String,
+    pub container_id: Option<String>,
+    pub container_name: String,
+    pub host: String,
+    pub port: i32,
+    pub root_password: String,
+    pub status: String,
+    pub database_count: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDatabaseServerRequest {
+    pub db_type: String, // "postgresql" or "mysql"
+    pub host: String,
+    pub port: i32,
+    pub container_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDatabaseServerRequest {
+    pub host: Option<String>,
+    pub port: Option<i32>,
+    pub regenerate_password: Option<bool>,
+}

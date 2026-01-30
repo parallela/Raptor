@@ -98,6 +98,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id/files/write", post(handlers::containers::write_file))
         .route("/containers/:id/files/upload", post(handlers::containers::upload_file)
             .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // chunk size + overhead
+        // Database routes (user-accessible)
+        .route("/databases", get(handlers::databases::list_databases))
+        .route("/databases", post(handlers::databases::create_database))
+        .route("/databases/available-types", get(handlers::databases::get_available_database_types))
+        .route("/databases/:id", get(handlers::databases::get_database))
+        .route("/databases/:id", delete(handlers::databases::delete_database))
+        .route("/databases/:id/reset-password", post(handlers::databases::reset_database_password))
         .route("/containers/:id/files/upload-chunk", post(handlers::containers::upload_file_chunk)
             .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // chunk size + overhead
         .route("/containers/:id/files/folder", post(handlers::containers::create_folder))
@@ -164,6 +171,14 @@ async fn main() -> anyhow::Result<()> {
             .route_layer(axum_middleware::from_fn(require_permission("roles.update"))))
         .route("/admin/roles/:id", delete(handlers::roles::delete_role)
             .route_layer(axum_middleware::from_fn(require_permission("roles.delete"))))
+        // Database server management (admin only)
+        .route("/admin/database-servers", get(handlers::databases::list_database_servers))
+        .route("/admin/database-servers", post(handlers::databases::create_database_server))
+        .route("/admin/database-servers/:id", get(handlers::databases::get_database_server))
+        .route("/admin/database-servers/:id", patch(handlers::databases::update_database_server))
+        .route("/admin/database-servers/:id", delete(handlers::databases::delete_database_server))
+        .route("/admin/database-servers/:id/start", post(handlers::databases::start_database_server))
+        .route("/admin/database-servers/:id/stop", post(handlers::databases::stop_database_server))
         .layer(axum_middleware::from_fn(require_admin));
 
     let protected_routes = Router::new()

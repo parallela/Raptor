@@ -1,8 +1,21 @@
 use bcrypt::hash;
+use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::Config;
+
+/// Generate a random password
+fn generate_password(length: usize) -> String {
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    (0..length)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
 
 pub async fn run(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
     if !was_executed(pool, "permissions").await? {
@@ -23,6 +36,11 @@ pub async fn run(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
     if !was_executed(pool, "admin_user").await? {
         seed_admin_user(pool, config).await?;
         mark_executed(pool, "admin_user").await?;
+    }
+
+    if !was_executed(pool, "database_server_passwords").await? {
+        seed_database_server_passwords(pool).await?;
+        mark_executed(pool, "database_server_passwords").await?;
     }
 
     Ok(())
@@ -205,3 +223,27 @@ async fn seed_admin_user(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
     tracing::info!("Admin user '{}' created", config.admin.username);
     Ok(())
 }
+
+async fn seed_database_server_passwords(pool: &PgPool) -> anyhow::Result<()> {
+    // Update any database servers that still have placeholder passwords
+    let servers: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, root_password FROM database_servers WHERE root_password LIKE 'CHANGE_ME%'"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for (id, _) in servers {
+        let new_password = generate_password(32);
+        sqlx::query(
+            "UPDATE database_servers SET root_password = $1, updated_at = NOW() WHERE id = $2"
+        )
+        .bind(&new_password)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        tracing::info!("Generated new root password for database server {}", id);
+    }
+
+    Ok(())
+}
+

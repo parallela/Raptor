@@ -316,6 +316,30 @@ export const api = {
     importFlake: (flakeJson: any) => request<import('./types').FlakeWithVariables>('/flakes/import', { method: 'POST', body: JSON.stringify({ flakeJson }) }),
     deleteFlake: (id: string) => request<void>(`/flakes/${id}`, { method: 'DELETE' }),
     exportFlake: (id: string) => request<any>(`/flakes/${id}/export`),
+
+    // Databases
+    listDatabases: () => request<any[]>('/databases'),
+    getDatabase: (id: string) => request<any>(`/databases/${id}`),
+    getAvailableDatabaseTypes: () => request<{ dbType: string; name: string; available: boolean }[]>('/databases/available-types'),
+    createDatabase: (data: { dbType: string; dbName?: string }) =>
+        request<any>('/databases', { method: 'POST', body: JSON.stringify(data) }),
+    deleteDatabase: (id: string) => request<void>(`/databases/${id}`, { method: 'DELETE' }),
+    resetDatabasePassword: (id: string) =>
+        request<any>(`/databases/${id}/reset-password`, { method: 'POST' }),
+
+    // Admin: Database servers
+    listDatabaseServers: () => request<any[]>('/admin/database-servers'),
+    getDatabaseServer: (id: string) => request<any>(`/admin/database-servers/${id}`),
+    createDatabaseServer: (data: { dbType: string; host: string; port: number; containerName?: string }) =>
+        request<any>('/admin/database-servers', { method: 'POST', body: JSON.stringify(data) }),
+    updateDatabaseServer: (id: string, data: { host?: string; port?: number; regeneratePassword?: boolean }) =>
+        request<any>(`/admin/database-servers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteDatabaseServer: (id: string) =>
+        request<void>(`/admin/database-servers/${id}`, { method: 'DELETE' }),
+    startDatabaseServer: (id: string) =>
+        request<any>(`/admin/database-servers/${id}/start`, { method: 'POST' }),
+    stopDatabaseServer: (id: string) =>
+        request<any>(`/admin/database-servers/${id}/stop`, { method: 'POST' }),
 };
 
 export function createWebSocket(containerId: string): WebSocket {

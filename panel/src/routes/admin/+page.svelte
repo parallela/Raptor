@@ -187,6 +187,20 @@
                     </div>
                 </div>
             </a>
+
+            <a href="/admin/database-servers" class="card-hover p-6 group">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-600/10 flex items-center justify-center group-hover:from-cyan-500/30 group-hover:to-cyan-600/20 transition-all duration-300">
+                        <svg class="w-6 h-6 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-white group-hover:text-cyan-400 transition-colors duration-200">Database Servers</h3>
+                        <p class="text-sm text-dark-400">PostgreSQL, MySQL and Redis containers</p>
+                    </div>
+                </div>
+            </a>
         </div>
 
         <!-- Recent Servers Table -->

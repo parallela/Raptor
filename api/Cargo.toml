@@ -32,3 +32,5 @@ rand = "0.8"
 md5 = "0.7"
 # Base64 encoding for file uploads
 base64 = "0.21"
+# Docker integration for database containers
+bollard = "0.16"

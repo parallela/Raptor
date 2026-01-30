@@ -2,6 +2,7 @@ pub mod allocations;
 pub mod auth;
 pub mod containers;
 pub mod daemons;
+pub mod databases;
 pub mod flakes;
 pub mod roles;
 pub mod users;
