@@ -134,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:name/files/write", post(handlers::write_file)
             .layer(DefaultBodyLimit::max(500 * 1024 * 1024))) // 500MB for file uploads
         .route("/containers/:name/files/write-chunk", post(handlers::write_file_chunk)
-            .layer(DefaultBodyLimit::max(50 * 1024 * 1024))) // 50MB per chunk
+            .layer(DefaultBodyLimit::max(110 * 1024 * 1024))) // 110MB per chunk
         .route("/containers/:name/files/folder", post(handlers::create_folder))
         .route("/containers/:name/files/delete", delete(handlers::delete_file))
         // Health check

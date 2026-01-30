@@ -91,9 +91,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id/files/read", get(handlers::containers::read_file))
         .route("/containers/:id/files/write", post(handlers::containers::write_file))
         .route("/containers/:id/files/upload", post(handlers::containers::upload_file)
-            .layer(DefaultBodyLimit::max(100 * 1024 * 1024))) // 100MB for single upload
+            .layer(DefaultBodyLimit::max(110 * 1024 * 1024))) // 110MB for single upload
         .route("/containers/:id/files/upload-chunk", post(handlers::containers::upload_file_chunk)
-            .layer(DefaultBodyLimit::max(50 * 1024 * 1024))) // 50MB per chunk
+            .layer(DefaultBodyLimit::max(110 * 1024 * 1024))) // 110MB per chunk
         .route("/containers/:id/files/folder", post(handlers::containers::create_folder))
         .route("/containers/:id/files/delete", delete(handlers::containers::delete_file))
         .route("/daemons", get(handlers::daemons::list_daemons))

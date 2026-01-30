@@ -242,7 +242,7 @@ export const api = {
         request<{ message: string }>(`/containers/${containerId}/files/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
     uploadContainerFile: async (containerId: string, path: string, file: File, onProgress?: (progress: number) => void) => {
         const t = get(token);
-        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+        const CHUNK_SIZE = 100 * 1024 * 1024; // 100MB chunks
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
         
         // For files smaller than chunk size, use simple upload
