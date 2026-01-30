@@ -325,8 +325,12 @@
                 <div class="card p-6 space-y-4">
                     <div class="flex items-start justify-between">
                         <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 rounded-xl bg-dark-700 flex items-center justify-center">
-                                <span class="text-2xl font-bold {getDbTypeColor(server.dbType)}">{getDbTypeIcon(server.dbType)}</span>
+                            <div class="w-12 h-12 rounded-xl bg-dark-700 flex items-center justify-center p-2">
+                                <img
+                                    src="/svg-icons/{server.dbType}.svg"
+                                    alt={server.dbType}
+                                    class="w-full h-full"
+                                />
                             </div>
                             <div>
                                 <h3 class="text-lg font-semibold text-white">{dbTypeConfig[server.dbType]?.name || server.dbType}</h3>
@@ -473,7 +477,11 @@
                                     ? 'border-primary-500 bg-primary-500/10'
                                     : 'border-dark-600 bg-dark-700/50 hover:border-dark-500'}"
                             >
-                                <span class="text-2xl font-bold block mb-1 {getDbTypeColor(dbType)}">{getDbTypeIcon(dbType)}</span>
+                                <img
+                                    src="/svg-icons/{dbType}.svg"
+                                    alt={dbTypeConfig[dbType]?.name}
+                                    class="w-8 h-8 mx-auto mb-1"
+                                />
                                 <span class="text-white font-medium text-sm">{dbTypeConfig[dbType]?.name}</span>
                             </button>
                         {/each}

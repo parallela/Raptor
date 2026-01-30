@@ -192,7 +192,11 @@
                     <!-- Header -->
                     <div class="flex items-start justify-between">
                         <div class="flex items-center gap-3">
-                            <span class="text-3xl">{getDbIcon(db.dbType)}</span>
+                            <img
+                                src="/svg-icons/{db.dbType}.svg"
+                                alt={db.dbType}
+                                class="w-10 h-10"
+                            />
                             <div>
                                 <h3 class="text-lg font-semibold text-white">{db.dbName}</h3>
                                 <p class="text-sm text-dark-400 capitalize">{db.dbType}</p>
@@ -412,7 +416,11 @@
                                     ? 'border-primary-500 bg-primary-500/10'
                                     : 'border-dark-600 bg-dark-700/50 hover:border-dark-500'}"
                             >
-                                <span class="text-3xl block mb-2">{dbType.dbType === 'postgresql' ? '🐘' : dbType.dbType === 'mysql' ? '🐬' : '🔴'}</span>
+                                <img
+                                    src="/svg-icons/{dbType.dbType}.svg"
+                                    alt={dbType.name}
+                                    class="w-10 h-10 mx-auto mb-2"
+                                />
                                 <span class="text-white font-medium">{dbType.name}</span>
                                 <span class="text-dark-400 text-xs block mt-1">{dbType.dbType === 'postgresql' ? 'v16' : dbType.dbType === 'mysql' ? 'v8.0' : 'v7'}</span>
                             </button>
