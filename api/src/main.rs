@@ -20,6 +20,12 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::config::Config;
 use crate::middleware::{require_permission, require_admin, require_manager};
 
+/// Chunk size for large file uploads (55MB)
+pub const UPLOAD_CHUNK_SIZE: usize = 55 * 1024 * 1024;
+
+/// Maximum body size for chunk uploads (chunk size + overhead for base64 encoding and JSON)
+pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 5 * 1024 * 1024; // 60MB
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
@@ -91,9 +97,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id/files/read", get(handlers::containers::read_file))
         .route("/containers/:id/files/write", post(handlers::containers::write_file))
         .route("/containers/:id/files/upload", post(handlers::containers::upload_file)
-            .layer(DefaultBodyLimit::max(110 * 1024 * 1024))) // 110MB for single upload
+            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // chunk size + overhead
         .route("/containers/:id/files/upload-chunk", post(handlers::containers::upload_file_chunk)
-            .layer(DefaultBodyLimit::max(110 * 1024 * 1024))) // 110MB per chunk
+            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // chunk size + overhead
         .route("/containers/:id/files/folder", post(handlers::containers::create_folder))
         .route("/containers/:id/files/delete", delete(handlers::containers::delete_file))
         .route("/daemons", get(handlers::daemons::list_daemons))

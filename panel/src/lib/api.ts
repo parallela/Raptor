@@ -4,6 +4,9 @@ import type { Container, Daemon, Allocation, ContainerAllocation, User, Resource
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+// Chunk size for large file uploads (55MB)
+export const UPLOAD_CHUNK_SIZE = 55 * 1024 * 1024;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const t = get(token);
     const headers: Record<string, string> = {
@@ -242,11 +245,10 @@ export const api = {
         request<{ message: string }>(`/containers/${containerId}/files/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
     uploadContainerFile: async (containerId: string, path: string, file: File, onProgress?: (progress: number) => void) => {
         const t = get(token);
-        const CHUNK_SIZE = 100 * 1024 * 1024; // 100MB chunks
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
         
         // For files smaller than chunk size, use simple upload
-        if (file.size <= CHUNK_SIZE) {
+        if (file.size <= UPLOAD_CHUNK_SIZE) {
             const formData = new FormData();
             formData.append('file', file);
             formData.append('path', path);
@@ -268,12 +270,12 @@ export const api = {
         }
         
         // For large files, use chunked upload
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const totalChunks = Math.ceil(file.size / UPLOAD_CHUNK_SIZE);
         const uploadId = crypto.randomUUID();
         
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-            const start = chunkIndex * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const start = chunkIndex * UPLOAD_CHUNK_SIZE;
+            const end = Math.min(start + UPLOAD_CHUNK_SIZE, file.size);
             const chunk = file.slice(start, end);
             
             const formData = new FormData();

@@ -19,6 +19,15 @@ use crate::docker::DockerManager;
 use crate::models::{AppState, ContainerLocks};
 use crate::ftp::FtpServerState;
 
+/// Chunk size for large file uploads (55MB)
+pub const UPLOAD_CHUNK_SIZE: usize = 55 * 1024 * 1024;
+
+/// Maximum body size for chunk uploads (chunk size + overhead for base64 encoding and JSON)
+pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 5 * 1024 * 1024; // 60MB
+
+/// Maximum body size for full file writes (500MB)
+pub const MAX_FILE_WRITE_SIZE: usize = 500 * 1024 * 1024;
+
 /// Load TLS configuration from certificate and key files
 fn load_tls_config(cert_path: &str, key_path: &str) -> anyhow::Result<axum_server::tls_rustls::RustlsConfig> {
     use std::fs::File;
@@ -132,9 +141,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:name/files", get(handlers::list_files))
         .route("/containers/:name/files/read", get(handlers::read_file))
         .route("/containers/:name/files/write", post(handlers::write_file)
-            .layer(DefaultBodyLimit::max(500 * 1024 * 1024))) // 500MB for file uploads
+            .layer(DefaultBodyLimit::max(MAX_FILE_WRITE_SIZE))) // 500MB for file writes
         .route("/containers/:name/files/write-chunk", post(handlers::write_file_chunk)
-            .layer(DefaultBodyLimit::max(110 * 1024 * 1024))) // 110MB per chunk
+            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // 60MB per chunk (55MB + overhead)
         .route("/containers/:name/files/folder", post(handlers::create_folder))
         .route("/containers/:name/files/delete", delete(handlers::delete_file))
         // Health check
