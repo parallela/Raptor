@@ -278,13 +278,16 @@ pub async fn create_and_start_database_container(
     tokio::fs::create_dir_all(&volume_path).await
         .map_err(|e| format!("Failed to create volume directory: {}", e))?;
 
-    // For Redis, create empty ACL file if it doesn't exist
+    // For Redis, create ACL file that disables default user and sets up admin
     if server.db_type == "redis" {
         let acl_path = format!("{}/users.acl", volume_path);
-        if !std::path::Path::new(&acl_path).exists() {
-            tokio::fs::write(&acl_path, "user default on nopass ~* +@all\n").await
-                .map_err(|e| format!("Failed to create Redis ACL file: {}", e))?;
-        }
+        // Disable default user (no anonymous access) and create admin user with root password
+        let acl_content = format!(
+            "user default off\nuser admin on >{} ~* +@all\n",
+            server.root_password
+        );
+        tokio::fs::write(&acl_path, acl_content).await
+            .map_err(|e| format!("Failed to create Redis ACL file: {}", e))?;
     }
 
     let container_config = Config {
@@ -432,7 +435,14 @@ pub async fn execute_db_command(
             command.to_string(),
         ],
         "redis" => {
-            let mut args = vec!["redis-cli".to_string()];
+            // Authenticate as admin user to run commands
+            let mut args = vec![
+                "redis-cli".to_string(),
+                "--user".to_string(),
+                "admin".to_string(),
+                "--pass".to_string(),
+                server.root_password.clone(),
+            ];
             for part in command.split_whitespace() {
                 args.push(part.to_string());
             }
