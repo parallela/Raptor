@@ -41,6 +41,7 @@ impl DockerManager {
         port_bindings: Option<HashMap<String, Vec<bollard::service::PortBinding>>>,
         resources: &ContainerResources,
         restart_policy_name: &str,
+        tty: bool,
     ) -> anyhow::Result<String> {
         let mut stream = self.docker.create_image(
             Some(CreateImageOptions {
@@ -184,11 +185,9 @@ impl DockerManager {
             } else {
                 Some(exposed_port_keys.iter().map(|k| (k.as_str(), HashMap::new())).collect())
             },
-            // Interactive mode WITHOUT TTY - this allows:
-            // 1. docker logs to work normally (no TTY escape sequences/prompts)
-            // 2. stdin commands to still work via docker attach
-            // Note: tty=false means no pseudo-terminal, which is cleaner for logs
-            tty: Some(false),             // No TTY = clean logs without escape sequences
+            // TTY mode - when true, allocates a pseudo-terminal (needed for interactive programs)
+            // When false, logs are cleaner without escape sequences
+            tty: Some(tty),
             open_stdin: Some(true),       // Keeps stdin open for commands
             attach_stdin: Some(true),     // Allows docker attach to send input
             attach_stdout: Some(true),    // Receive server output

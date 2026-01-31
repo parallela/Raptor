@@ -328,6 +328,7 @@ pub async fn create_container(
             if port_bindings.is_empty() { None } else { Some(port_bindings) },
             &resources,
             &req.restart_policy,
+            req.tty,
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -352,6 +353,7 @@ pub async fn create_container(
         installed: !has_install_script, // If no install script, consider it installed
         environment,
         restart_policy: req.restart_policy.clone(),
+        tty: req.tty,
     };
 
     // Insert into state - guard dropped immediately
@@ -589,6 +591,7 @@ pub async fn start_container(
                 if port_bindings.is_empty() { None } else { Some(port_bindings) },
                 &container.resources,
                 &container.restart_policy,
+                container.tty,
             )
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -754,6 +757,7 @@ pub async fn recreate_container(
             if port_bindings.is_empty() { None } else { Some(port_bindings) },
             &container.resources,
             &container.restart_policy,
+            container.tty,
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

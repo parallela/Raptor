@@ -28,6 +28,9 @@ pub struct Flake {
     /// Docker restart policy: "no", "always", "on-failure", "unless-stopped"
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
+    /// Whether to allocate a TTY for the container (needed for interactive programs)
+    #[serde(default)]
+    pub tty: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

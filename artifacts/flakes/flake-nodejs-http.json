@@ -6,6 +6,7 @@
     "docker_image": "artifacts.lstan.eu/nodejs:22",
     "startup_command": "node {{JS_FILE}}",
     "restart_policy": "on-failure",
+    "tty": false,
     "config_files": {},
     "startup_detection": "Server listening on port",
     "install_script": "# Create default index.js if it doesn't exist\nif [ ! -f index.js ]; then\n  echo \"Creating default index.js...\"\n  cat > index.js << 'JSEOF'\nconst http = require('http');\n\nconst PORT = process.env.SERVER_PORT || 3000;\n\nconst server = http.createServer((req, res) => {\n  res.writeHead(200, { 'Content-Type': 'text/plain' });\n  res.end('Hello from Raptor Node.js Server!\\n');\n});\n\nserver.listen(PORT, '0.0.0.0', () => {\n  console.log(`Server listening on port ${PORT}`);\n});\nJSEOF\n  echo \"Default index.js created!\"\nfi\n\n# Create package.json if it doesn't exist\nif [ ! -f package.json ]; then\n  echo \"Creating default package.json...\"\n  cat > package.json << 'PKGEOF'\n{\n  \"name\": \"raptor-nodejs-app\",\n  \"version\": \"1.0.0\",\n  \"main\": \"index.js\",\n  \"scripts\": {\n    \"start\": \"node index.js\"\n  }\n}\nPKGEOF\n  echo \"Default package.json created!\"\nfi",

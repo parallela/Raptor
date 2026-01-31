@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: raptor-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raptor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-raptor}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raptor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - raptor-network
+
+  api:
+    image: artifacts.lstan.eu/raptor-api:${API_VERSION:-latest}
+    container_name: raptor-api
+    environment:
+      # Database
+      DATABASE_URL: postgres://${POSTGRES_USER:-raptor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-raptor}
+
+      # Security
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRY_DAYS: ${JWT_EXPIRY_DAYS:-7}
+      BCRYPT_COST: ${BCRYPT_COST:-12}
+
+      # Server
+      API_ADDR: 0.0.0.0:3000
+      APP_URL: ${APP_URL:?APP_URL is required}
+      RUST_LOG: ${RUST_LOG:-info}
+
+      # Admin user (created on first run)
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL is required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+
+      # SMTP (optional)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Raptor}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - raptor-network
+
+  panel:
+    image: artifacts.lstan.eu/raptor-panel:${PANEL_VERSION:-latest}
+    container_name: raptor-panel
+    environment:
+      ORIGIN: ${ORIGIN:?ORIGIN is required}
+      PORT: 3000
+      NODE_ENV: production
+      BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-Infinity}
+    ports:
+      - "${PANEL_PORT:-5173}:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - raptor-network
+
+volumes:
+  postgres_data:
+
+networks:
+  raptor-network:
+    driver: bridge

@@ -131,7 +131,7 @@ pub async fn create_container(
         .ok_or(AppError::NotFound)?;
 
     // Load flake if provided
-    let (image, startup_script, flake_id, install_script, mut flake_variables) = if let Some(fid) = req.flake_id {
+    let (image, startup_script, flake_id, install_script, mut flake_variables, restart_policy, tty) = if let Some(fid) = req.flake_id {
         let flake: crate::handlers::flakes::Flake = sqlx::query_as("SELECT * FROM flakes WHERE id = $1")
             .bind(fid)
             .fetch_optional(&state.db)
@@ -174,11 +174,13 @@ pub async fn create_container(
             Some(fid),
             flake.install_script,
             env_vars,
+            flake.restart_policy,
+            flake.tty,
         )
     } else {
         // No flake - require image
         let image = req.image.clone().ok_or(AppError::BadRequest("Either flake_id or image is required".into()))?;
-        (image, req.startup_script.clone(), None, None, std::collections::HashMap::new())
+        (image, req.startup_script.clone(), None, None, std::collections::HashMap::new(), "unless-stopped".to_string(), false)
     };
 
     // Generate container UUID first - this will be used as the Docker container name
@@ -273,7 +275,9 @@ pub async fn create_container(
         "ports": port_mappings,
         "allocations": allocations_for_daemon,
         "installScript": install_script,
-        "environment": flake_variables
+        "environment": flake_variables,
+        "restartPolicy": restart_policy,
+        "tty": tty
     });
 
     let res = client
@@ -1894,7 +1898,7 @@ pub async fn upload_file_chunk(
     let chunk_data = chunk_data.ok_or_else(|| AppError::BadRequest("Missing chunk data".to_string()))?;
 
     tracing::info!("upload_file_chunk: Getting daemon info for container {}", container.id);
-    
+
     // Get daemon info
     let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
         .bind(container.daemon_id)
@@ -1903,15 +1907,15 @@ pub async fn upload_file_chunk(
         .ok_or(AppError::NotFound)?;
 
     tracing::info!("upload_file_chunk: Found daemon {}, encoding {} bytes to base64", daemon.id, chunk_data.len());
-    
+
     // Forward chunk directly to daemon - no buffering in API!
     let content_base64 = general_purpose::STANDARD.encode(&chunk_data);
-    
+
     tracing::info!("upload_file_chunk: Base64 encoded size: {} bytes", content_base64.len());
 
     let client = daemon_client();
     let url = format!("{}/containers/{}/files/write-chunk", daemon.base_url(), container.id);
-    
+
     tracing::info!("upload_file_chunk: Sending chunk {} of {} to daemon at {}", chunk_index, total_chunks, url);
 
     let resp = client
@@ -1947,7 +1951,7 @@ pub async fn upload_file_chunk(
             tracing::error!("upload_file_chunk: Failed to parse daemon response: {}", e);
             AppError::BadRequest(format!("Invalid daemon response: {}", e))
         })?;
-    
+
     tracing::info!("upload_file_chunk: Chunk {} uploaded successfully", chunk_index);
 
     Ok(Json(daemon_response))

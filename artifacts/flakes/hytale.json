@@ -6,6 +6,7 @@
   "dockerImage": "ghcr.io/pterodactyl/games:hytale",
   "startupCommand": "java -XX:AOTCache=Server/HytaleServer.aot -Xms128M -Xmx{{SERVER_MEMORY}}M -jar Server/HytaleServer.jar {{HYTALE_ALLOW_OP_FLAG}} --assets Assets.zip --bind 0.0.0.0:{{SERVER_PORT}}",
   "restartPolicy": "unless-stopped",
+  "tty": true,
   "configFiles": {},
   "startupDetection": "Hytale Server Booted",
   "stopCommand": "/stop",

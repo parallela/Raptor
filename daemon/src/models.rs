@@ -83,6 +83,10 @@ pub struct ManagedContainer {
     /// Use "no" or "on-failure" for services that shouldn't restart on manual stop
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
+    /// Whether to allocate a TTY for the container (needed for interactive programs)
+    /// Default is false for cleaner logs
+    #[serde(default)]
+    pub tty: bool,
 }
 
 fn default_restart_policy() -> String {
@@ -178,6 +182,9 @@ pub struct CreateContainerRequest {
     /// Restart policy: "no", "always", "on-failure", "unless-stopped"
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
+    /// Whether to allocate a TTY (needed for interactive programs like Hytale)
+    #[serde(default)]
+    pub tty: bool,
 }
 
 fn default_memory() -> i64 { 512 }
