@@ -3,12 +3,12 @@ import { token } from './stores';
 import type { Container, Daemon, Allocation, ContainerAllocation, User, ResourceLimits, ContainerPort } from './types';
 
 // API URL priority:
-// 1. Runtime config from window.__API_URL__ (can be injected by server)
+// 1. Runtime config from window.__CONFIG__.API_URL (injected at runtime)
 // 2. VITE_API_URL environment variable (set at build time)
 // 3. Empty string (same origin - API expected at same host)
 function getApiUrl(): string {
-    if (typeof window !== 'undefined' && (window as any).__API_URL__) {
-        return (window as any).__API_URL__;
+    if (typeof window !== 'undefined' && (window as any).__CONFIG__?.API_URL) {
+        return (window as any).__CONFIG__.API_URL;
     }
     return import.meta.env.VITE_API_URL || '';
 }

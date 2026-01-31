@@ -507,6 +507,11 @@ impl DockerManager {
         let full_script = format!(r#"
             echo "[Raptor Install] Starting installation..."
             echo "[Raptor Install] Working directory: $(pwd)"
+
+            # Create /mnt/server symlink for Pterodactyl egg compatibility
+            mkdir -p /mnt 2>/dev/null || true
+            ln -sf /home/container /mnt/server 2>/dev/null || true
+
             cd /home/container
             echo "[Raptor Install] Running install script..."
 

@@ -1,0 +1,88 @@
+{
+  "name": "Hytale",
+  "slug": "hytale",
+  "author": "Raptor Panel",
+  "description": "Set out on an adventure built for both creation and play. Hytale blends the freedom of a sandbox with the momentum of an RPG: explore a procedurally generated world full of dungeons, secrets, and a variety of creatures, then shape it block by block.",
+  "dockerImage": "ghcr.io/pterodactyl/games:hytale",
+  "startupCommand": "java -XX:AOTCache=Server/HytaleServer.aot -Xms128M -Xmx{{SERVER_MEMORY}}M -jar Server/HytaleServer.jar {{HYTALE_ALLOW_OP_FLAG}} --assets Assets.zip --bind 0.0.0.0:{{SERVER_PORT}}",
+  "restartPolicy": "unless-stopped",
+  "configFiles": {},
+  "startupDetection": "Hytale Server Booted",
+  "stopCommand": "/stop",
+  "installScript": "#!/bin/bash\nset -e\n\ncd /home/container\n\necho \"Downloading Hytale Downloader CLI...\"\n\nDOWNLOAD_URL=\"https://downloader.hytale.com/hytale-downloader.zip\"\n\nrm -f hytale-downloader.zip\ncurl -o hytale-downloader.zip $DOWNLOAD_URL\nunzip -o hytale-downloader.zip -d hytale-downloader\nmv hytale-downloader/hytale-downloader-linux-amd64 hytale-downloader/hytale-downloader-linux\nchmod 555 hytale-downloader/hytale-downloader-linux\n\necho \"Verifying Hytale Downloader installation...\"\necho \"Hytale Downloader version: $(./hytale-downloader/hytale-downloader-linux -version)\"\n\necho \"Hytale Downloader installed successfully.\"",
+  "installImage": "ghcr.io/pterodactyl/installers:alpine",
+  "variables": [
+    {
+      "name": "Server Memory",
+      "description": "The maximum amount of memory (MB) the server can use.",
+      "envVariable": "SERVER_MEMORY",
+      "defaultValue": "1024",
+      "rules": "required|numeric|min:512",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Accept Early Plugins",
+      "description": "Hytale warns that loading early plugins is unsupported and may cause stability issues.",
+      "envVariable": "HYTALE_ACCEPT_EARLY_PLUGINS",
+      "defaultValue": "1",
+      "rules": "required|boolean",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Auth Mode",
+      "description": "Authentication mode (authenticated or offline).",
+      "envVariable": "HYTALE_AUTH_MODE",
+      "defaultValue": "authenticated",
+      "rules": "required|string",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Patchline",
+      "description": "The branch of Hytale to install (release or pre-release).",
+      "envVariable": "HYTALE_PATCHLINE",
+      "defaultValue": "release",
+      "rules": "required|string",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Disable Sentry",
+      "description": "Hytale uses Sentry to track crashes. Disable Sentry during active plugin development.",
+      "envVariable": "DISABLE_SENTRY",
+      "defaultValue": "0",
+      "rules": "required|boolean",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Use Ahead-of-Time Cache",
+      "description": "Hytale provides a pre-trained AOT Java cache which can significantly improve boot times.",
+      "envVariable": "USE_AOT_CACHE",
+      "defaultValue": "0",
+      "rules": "required|boolean",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Allow Operators",
+      "description": "Allow operators on the server.",
+      "envVariable": "HYTALE_ALLOW_OP",
+      "defaultValue": "1",
+      "rules": "required|boolean",
+      "userViewable": true,
+      "userEditable": true
+    },
+    {
+      "name": "Allow OP Flag",
+      "description": "Internal flag for --allow-op parameter. Set to '--allow-op' to enable, empty to disable.",
+      "envVariable": "HYTALE_ALLOW_OP_FLAG",
+      "defaultValue": "--allow-op",
+      "rules": "string",
+      "userViewable": false,
+      "userEditable": false
+    }
+  ]
+}
