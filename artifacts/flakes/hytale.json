@@ -4,7 +4,7 @@
   "author": "Raptor Panel",
   "description": "Set out on an adventure built for both creation and play. Hytale blends the freedom of a sandbox with the momentum of an RPG: explore a procedurally generated world full of dungeons, secrets, and a variety of creatures, then shape it block by block.",
   "dockerImage": "ghcr.io/pterodactyl/games:hytale",
-  "startupCommand": "java -XX:AOTCache=Server/HytaleServer.aot -Xms128M -Xmx{{SERVER_MEMORY}}M -jar Server/HytaleServer.jar {{HYTALE_ALLOW_OP_FLAG}} --assets Assets.zip --bind 0.0.0.0:{{SERVER_PORT}}",
+  "startupCommand": "export HOME=/home/container && cd /home/container && ./hytale-downloader/hytale-downloader-linux download --patchline {{HYTALE_PATCHLINE}} && java -Xms{{SERVER_MEMORY}}M -Xmx{{SERVER_MEMORY}}M -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:InitiatingHeapOccupancyPercent=30 -XX:+PerfDisableSharedMem -jar Server/HytaleServer.jar {{HYTALE_ALLOW_OP_FLAG}} --assets Assets.zip --bind 0.0.0.0:{{SERVER_PORT}}",
   "restartPolicy": "unless-stopped",
   "tty": true,
   "configFiles": {},

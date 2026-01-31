@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::docker::RAPTOR_NETWORK;
+
 const MAX_REDIS_DB_NUMBER: i32 = 10000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,7 +318,8 @@ pub async fn create_and_start_database_container(
                 name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
                 ..Default::default()
             }),
-            memory: Some(1024 * 1024 * 1024), // 1GB
+            memory: Some(1024 * 1024 * 1024), // 1GB TODO: maybe move memory for the databases to config
+            network_mode: Some(RAPTOR_NETWORK.to_string()),
             ..Default::default()
         }),
         ..Default::default()

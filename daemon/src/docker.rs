@@ -4,6 +4,7 @@ use bollard::container::{
     RemoveContainerOptions, StartContainerOptions, StatsOptions, StopContainerOptions,
 };
 use bollard::image::CreateImageOptions;
+use bollard::network::CreateNetworkOptions;
 use bollard::Docker;
 use futures_util::StreamExt;
 use std::collections::HashMap;
@@ -11,6 +12,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 
 use crate::models::{ContainerInfo, ContainerResources, ContainerStats};
+
+/// Default network name for all Raptor containers
+pub const RAPTOR_NETWORK: &str = "raptord_internal";
 
 pub struct DockerManager {
     docker: Docker,
@@ -29,7 +33,38 @@ impl DockerManager {
         };
         docker.ping().await?;
         tracing::info!("Connected to Docker daemon");
-        Ok(Self { docker })
+
+        let manager = Self { docker };
+
+        // Ensure the internal network exists
+        manager.ensure_network().await?;
+
+        Ok(manager)
+    }
+
+    /// Ensure the raptord_internal network exists
+    async fn ensure_network(&self) -> anyhow::Result<()> {
+        // Check if network already exists
+        match self.docker.inspect_network::<String>(RAPTOR_NETWORK, None).await {
+            Ok(_) => {
+                tracing::info!("Network {} already exists", RAPTOR_NETWORK);
+                return Ok(());
+            }
+            Err(_) => {
+                // Network doesn't exist, create it
+                tracing::info!("Creating network {}", RAPTOR_NETWORK);
+            }
+        }
+
+        let config = CreateNetworkOptions {
+            name: RAPTOR_NETWORK,
+            driver: "bridge",
+            ..Default::default()
+        };
+
+        self.docker.create_network(config).await?;
+        tracing::info!("Created network {}", RAPTOR_NETWORK);
+        Ok(())
     }
 
 
@@ -59,12 +94,29 @@ impl DockerManager {
             }
         }
 
-        // Set STARTUP env var for the entrypoint.sh to use
-        // We don't set cmd because our custom images use an entrypoint.sh that reads STARTUP
-        // This allows the entrypoint to do setup (print versions, parse variables, etc.)
-        let env_vars: Option<Vec<String>> = startup_script.map(|s| {
-            vec![format!("STARTUP={}", s)]
-        });
+        // Set environment variables for the container
+        // HOME and USER are set so applications can find their config files
+        // when running as a custom UID that doesn't exist in /etc/passwd
+        let mut env_vars: Vec<String> = vec![
+            "HOME=/home/container".to_string(),
+            "USER=container".to_string(),
+        ];
+
+        // Build entrypoint and cmd based on whether we have a startup script
+        // We bypass the image's entrypoint and run our command directly with bash -c
+        // This ensures our environment (HOME, etc.) is properly set before any commands run
+        let (entrypoint, cmd) = if let Some(s) = startup_script {
+            // Also add STARTUP env var for compatibility with scripts that might read it
+            env_vars.push(format!("STARTUP={}", s));
+            // Use bash -c to run the startup script directly, bypassing image entrypoint
+            (
+                Some(vec!["/bin/bash".to_string()]),
+                Some(vec!["-c".to_string(), s.to_string()])
+            )
+        } else {
+            // No startup script - let the image's default entrypoint/cmd run
+            (None, None)
+        };
 
         let memory_bytes = resources.memory_limit * 1024 * 1024;
         let swap_bytes = resources.swap_limit * 1024 * 1024;
@@ -132,7 +184,26 @@ impl DockerManager {
             }
         }
 
-        let binds = vec![format!("{}:/home/container:rw", volume_path)];
+        // Create a persistent machine-id file in the volume if it doesn't exist
+        // This is needed for applications like Hytale that use machine-id for OAuth device identification
+        let machine_id_path = format!("{}/.machine-id", volume_path);
+        if !std::path::Path::new(&machine_id_path).exists() {
+            // Generate a random machine ID (32 hex characters)
+            use rand::Rng;
+            let machine_id: String = (0..32)
+                .map(|_| format!("{:x}", rand::thread_rng().gen::<u8>() % 16))
+                .collect();
+            if let Err(e) = tokio::fs::write(&machine_id_path, format!("{}\n", machine_id)).await {
+                tracing::warn!("Failed to create machine-id file: {}", e);
+            } else {
+                tracing::debug!("Created persistent machine-id file at {}", machine_id_path);
+            }
+        }
+
+        let binds = vec![
+            format!("{}:/home/container:rw", volume_path),
+            format!("{}:/etc/machine-id:ro", machine_id_path),
+        ];
 
         // Get the current user's UID and GID to pass to the container
         // This ensures files created in the container are owned by the daemon user
@@ -163,6 +234,7 @@ impl DockerManager {
             blkio_weight: Some(resources.io_weight as u16),
             restart_policy: Some(restart_policy),
             binds: Some(binds),
+            network_mode: Some(RAPTOR_NETWORK.to_string()),
             ..Default::default()
         };
 
@@ -174,11 +246,15 @@ impl DockerManager {
 
         let config = Config {
             image: Some(image),
-            // Don't set cmd - let the image's entrypoint.sh use the STARTUP env var
-            env: env_vars.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
+            // Override entrypoint to run our startup command directly with bash -c
+            // This bypasses the image's entrypoint which may run commands before our env is set
+            entrypoint: entrypoint.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
+            cmd: cmd.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
+            env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
             // Run container as the daemon user's UID:GID so files are accessible via FTP
+            // This ensures all files created by the container are owned by the raptor user
             user: user_spec.as_deref(),
             exposed_ports: if exposed_port_keys.is_empty() {
                 None
@@ -527,6 +603,7 @@ impl DockerManager {
         let host_config = bollard::service::HostConfig {
             binds: Some(binds),
             auto_remove: Some(true), // Automatically remove container when it exits
+            network_mode: Some(RAPTOR_NETWORK.to_string()),
             ..Default::default()
         };
 
@@ -835,6 +912,10 @@ impl DockerManager {
                             LogOutput::StdErr { message } => {
                                 format!("\x1b[31m{}\x1b[0m", String::from_utf8_lossy(&message).trim_end())
                             }
+                            // TTY mode combines stdout/stderr into Console
+                            LogOutput::Console { message } => {
+                                String::from_utf8_lossy(&message).trim_end().to_string()
+                            }
                             _ => continue,
                         };
 
@@ -877,6 +958,10 @@ impl DockerManager {
                             }
                             LogOutput::StdErr { message } => {
                                 format!("\x1b[31m{}\x1b[0m", String::from_utf8_lossy(&message).trim_end())
+                            }
+                            // TTY mode combines stdout/stderr into Console
+                            LogOutput::Console { message } => {
+                                String::from_utf8_lossy(&message).trim_end().to_string()
                             }
                             _ => continue,
                         };
