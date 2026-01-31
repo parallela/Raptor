@@ -12,7 +12,9 @@ RUN npm ci 2>/dev/null || npm install
 # Copy all source files
 COPY panel/ ./
 
-# Build the application (this compiles Tailwind CSS and bundles everything)
+# Build with a placeholder that will be replaced at runtime
+# Using a relative path so it works with any domain
+ENV VITE_API_URL=""
 RUN npm run build
 
 # Prune dev dependencies, keep only production
@@ -32,7 +34,7 @@ EXPOSE 3000
 
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV ORIGIN=http://localhost:5173
 
-# The node adapter creates a self-contained server
+# ORIGIN must be set at runtime to match your domain
+# Example: ORIGIN=https://panel.example.com
 CMD ["node", "build"]

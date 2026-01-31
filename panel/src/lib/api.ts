@@ -2,7 +2,18 @@ import { get } from 'svelte/store';
 import { token } from './stores';
 import type { Container, Daemon, Allocation, ContainerAllocation, User, ResourceLimits, ContainerPort } from './types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// API URL priority:
+// 1. Runtime config from window.__API_URL__ (can be injected by server)
+// 2. VITE_API_URL environment variable (set at build time)
+// 3. Empty string (same origin - API expected at same host)
+function getApiUrl(): string {
+    if (typeof window !== 'undefined' && (window as any).__API_URL__) {
+        return (window as any).__API_URL__;
+    }
+    return import.meta.env.VITE_API_URL || '';
+}
+
+const API_URL = getApiUrl();
 
 // Chunk size for large file uploads (55MB)
 export const UPLOAD_CHUNK_SIZE = 55 * 1024 * 1024;
@@ -346,14 +357,30 @@ export const api = {
 
 export function createWebSocket(containerId: string): WebSocket {
     const t = get(token);
-    const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000')
-        .replace('http', 'ws');
+    const apiUrl = getApiUrl();
+    let wsUrl: string;
+
+    if (apiUrl) {
+        wsUrl = apiUrl.replace('http', 'ws');
+    } else {
+        // Same origin - construct WebSocket URL from current location
+        const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}`;
+    }
     return new WebSocket(`${wsUrl}/ws/containers/${containerId}/logs?token=${t}`);
 }
 
 export function createStatsWebSocket(containerId: string): WebSocket {
     const t = get(token);
-    const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000')
-        .replace('http', 'ws');
+    const apiUrl = getApiUrl();
+    let wsUrl: string;
+
+    if (apiUrl) {
+        wsUrl = apiUrl.replace('http', 'ws');
+    } else {
+        // Same origin - construct WebSocket URL from current location
+        const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}`;
+    }
     return new WebSocket(`${wsUrl}/ws/containers/${containerId}/stats?token=${t}`);
 }
