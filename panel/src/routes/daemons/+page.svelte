@@ -124,7 +124,7 @@
     function connectStatsWebSocket() {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const apiHost = import.meta.env.VITE_API_URL?.replace(/^https?:\/\//, '') || 'localhost:3000';
-        const wsUrl = `${wsProtocol}
+        const wsUrl = `${wsProtocol}//${apiHost}/ws/daemon-stats`;
 
         statsSocket = new WebSocket(wsUrl);
 
