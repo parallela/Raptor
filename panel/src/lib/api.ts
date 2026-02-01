@@ -214,7 +214,7 @@ export const api = {
         formData.append('file', file);
         formData.append('path', path);
 
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/containers/${containerId}/files/upload`, {
+        const response = await fetch(`${getApiUrl()}/containers/${containerId}/files/upload`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${t}`
@@ -241,8 +241,8 @@ export const api = {
         request<{ message: string }>(`/containers/${containerId}/files/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
     uploadContainerFile: async (containerId: string, path: string, file: File, onProgress?: (progress: number) => void) => {
         const t = get(token);
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-        
+        const apiUrl = getApiUrl();
+
         if (file.size <= UPLOAD_CHUNK_SIZE) {
             const formData = new FormData();
             formData.append('file', file);
