@@ -112,17 +112,17 @@
     $: selectedDaemon = daemons.find(d => d.id === newServer.daemonId);
 </script>
 
-<div class="space-y-6 max-w-4xl mx-auto">
+<div class="space-y-4 md:space-y-6 max-w-4xl mx-auto">
     <!-- Header -->
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-3 md:gap-4">
         <a href="/admin" class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors duration-200">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
             </svg>
         </a>
         <div>
-            <h1 class="section-title">Create New Server</h1>
-            <p class="section-subtitle">Configure resources and deploy a new container</p>
+            <h1 class="text-xl md:text-2xl font-bold text-white">Create New Server</h1>
+            <p class="text-sm text-dark-400">Configure resources and deploy a new container</p>
         </div>
     </div>
 

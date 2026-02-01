@@ -350,8 +350,8 @@
     {:else if container}
         <div class="flex-shrink-0 border-b border-dark-700/50 bg-dark-900/50 backdrop-blur-sm">
             <div class="px-3 md:px-6 py-3 md:py-4">
-                <!-- Mobile: Compact header -->
-                <div class="flex items-center justify-between gap-2">
+                <!-- Header row: Back button, name, status, actions -->
+                <div class="flex items-center justify-between gap-2 md:gap-4">
                     <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
                         <a href="/containers" class="p-1.5 md:p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors flex-shrink-0">
                             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -372,7 +372,7 @@
                         </div>
                     </div>
 
-                    <!-- Action buttons - responsive -->
+                    <!-- Action buttons -->
                     <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
                         {#if isRunning}
                             <button on:click={restartContainer} disabled={!!$actionLoadingStore} class="btn-secondary text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
@@ -389,52 +389,62 @@
                     </div>
                 </div>
 
-                <!-- Mobile Stats Bar -->
+                <!-- Stats Box - Separate element below header -->
                 {#if isRunning && $statsStore}
-                    <div class="flex items-center gap-3 mt-2 md:hidden overflow-x-auto pb-1">
-                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
-                            <span class="text-dark-400">CPU</span>
-                            <span class="text-white font-medium">{$statsStore.cpuPercent.toFixed(1)}%</span>
-                        </div>
-                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
-                            <span class="text-dark-400">RAM</span>
-                            <span class="text-white font-medium">{formatStatsMemory($statsStore.memoryUsage)}</span>
-                        </div>
-                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
-                            <span class="text-dark-400">↓</span>
-                            <span class="text-white font-medium">{formatBytes($statsStore.networkRx)}</span>
-                        </div>
-                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
-                            <span class="text-dark-400">↑</span>
-                            <span class="text-white font-medium">{formatBytes($statsStore.networkTx)}</span>
+                    <div class="mt-3 p-2 md:p-3 bg-dark-800/60 rounded-lg border border-dark-700/50">
+                        <div class="grid grid-cols-4 gap-2 md:gap-4">
+                            <!-- CPU -->
+                            <div class="text-center">
+                                <div class="flex items-center justify-center gap-1 mb-1">
+                                    <svg class="w-4 h-4 text-primary-400" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M6 18h12V6H6v12zm3-9h6v6H9V9zm-8 0h2v6H1V9zm20 0h2v6h-2V9zM9 1v2h6V1H9zm0 20v2h6v-2H9z"/>
+                                    </svg>
+                                    <span class="text-xs text-dark-400 hidden sm:inline">CPU</span>
+                                </div>
+                                <div class="text-sm md:text-base font-semibold text-white">{$statsStore.cpuPercent.toFixed(1)}%</div>
+                                <div class="w-full h-1.5 bg-dark-700 rounded-full mt-1.5 overflow-hidden">
+                                    <div class="h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full transition-all duration-300" style="width: {Math.min($statsStore.cpuPercent, 100)}%"></div>
+                                </div>
+                            </div>
+                            <!-- Memory -->
+                            <div class="text-center">
+                                <div class="flex items-center justify-center gap-1 mb-1">
+                                    <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M2 7h20v10H2V7zm2 2v6h16V9H4zm2 1h2v4H6v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4z"/>
+                                    </svg>
+                                    <span class="text-xs text-dark-400 hidden sm:inline">RAM</span>
+                                </div>
+                                <div class="text-sm md:text-base font-semibold text-white">{formatStatsMemory($statsStore.memoryUsage)}</div>
+                                <div class="w-full h-1.5 bg-dark-700 rounded-full mt-1.5 overflow-hidden">
+                                    <div class="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-300" style="width: {Math.min($statsStore.memoryPercent, 100)}%"></div>
+                                </div>
+                            </div>
+                            <!-- Network In -->
+                            <div class="text-center">
+                                <div class="flex items-center justify-center gap-1 mb-1">
+                                    <svg class="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 16l-6-6h4V4h4v6h4l-6 6zm-8 2h16v2H4v-2z"/>
+                                    </svg>
+                                    <span class="text-xs text-dark-400 hidden sm:inline">Down</span>
+                                </div>
+                                <div class="text-sm md:text-base font-semibold text-white">{formatBytes($statsStore.networkRx)}</div>
+                                <div class="text-xs text-dark-500 mt-1 hidden sm:block">received</div>
+                            </div>
+                            <!-- Network Out -->
+                            <div class="text-center">
+                                <div class="flex items-center justify-center gap-1 mb-1">
+                                    <svg class="w-4 h-4 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 8l6 6h-4v6h-4v-6H6l6-6zM4 4h16v2H4V4z"/>
+                                    </svg>
+                                    <span class="text-xs text-dark-400 hidden sm:inline">Up</span>
+                                </div>
+                                <div class="text-sm md:text-base font-semibold text-white">{formatBytes($statsStore.networkTx)}</div>
+                                <div class="text-xs text-dark-500 mt-1 hidden sm:block">sent</div>
+                            </div>
                         </div>
                     </div>
                 {/if}
 
-                <!-- Desktop Stats Display -->
-                {#if isRunning && $statsStore}
-                    <div class="hidden md:flex items-center gap-4 px-4 absolute right-6 top-4">
-                        <div class="text-center">
-                            <div class="text-xs text-dark-400 mb-1">CPU</div>
-                            <div class="text-sm font-medium text-white">{$statsStore.cpuPercent.toFixed(1)}%</div>
-                            <div class="w-16 h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
-                                <div class="h-full bg-primary-500 rounded-full transition-all" style="width: {Math.min($statsStore.cpuPercent, 100)}%"></div>
-                            </div>
-                        </div>
-                        <div class="text-center">
-                            <div class="text-xs text-dark-400 mb-1">Memory</div>
-                            <div class="text-sm font-medium text-white">{formatStatsMemory($statsStore.memoryUsage)}</div>
-                            <div class="w-16 h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
-                                <div class="h-full bg-emerald-500 rounded-full transition-all" style="width: {Math.min($statsStore.memoryPercent, 100)}%"></div>
-                            </div>
-                        </div>
-                        <div class="text-center">
-                            <div class="text-xs text-dark-400 mb-1">Network</div>
-                            <div class="text-xs font-medium text-white">↓{formatBytes($statsStore.networkRx)}</div>
-                            <div class="text-xs font-medium text-white">↑{formatBytes($statsStore.networkTx)}</div>
-                        </div>
-                    </div>
-                {/if}
 
                 <!-- Tabs - scrollable on mobile -->
                 <div class="flex gap-1 mt-3 md:mt-4 -mb-3 md:-mb-4 overflow-x-auto">

@@ -256,32 +256,32 @@
     <title>Database Servers - Admin - Raptor</title>
 </svelte:head>
 
-<div class="space-y-6">
-    <div class="flex items-center justify-between">
-        <div class="flex items-center gap-4">
+<div class="space-y-4 md:space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 md:gap-4">
             <a href="/admin" class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800/50 transition-colors">
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
             </a>
             <div>
-                <h1 class="text-2xl font-bold text-white">Database Servers</h1>
-                <p class="text-dark-400 mt-1">Manage shared database containers for users</p>
+                <h1 class="text-xl md:text-2xl font-bold text-white">Database Servers</h1>
+                <p class="text-sm text-dark-400">Manage shared database containers</p>
             </div>
         </div>
-        <div class="flex gap-2">
-            <button on:click={loadServers} class="btn-secondary" disabled={loading}>
-                <svg class="w-4 h-4 mr-2 {loading ? 'animate-spin' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <div class="flex gap-2 w-full sm:w-auto">
+            <button on:click={loadServers} class="btn-secondary flex-1 sm:flex-initial" disabled={loading}>
+                <svg class="w-4 h-4 {loading ? 'animate-spin' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Refresh
+                <span class="hidden sm:inline ml-2">Refresh</span>
             </button>
             {#if availableTypes.length > 0}
-                <button on:click={() => { newServer.dbType = availableTypes[0]; onDbTypeChange(); showCreateModal = true; }} class="btn-primary">
-                    <svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <button on:click={() => { newServer.dbType = availableTypes[0]; onDbTypeChange(); showCreateModal = true; }} class="btn-primary flex-1 sm:flex-initial">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
-                    Add Server
+                    <span class="ml-2">Add Server</span>
                 </button>
             {/if}
         </div>

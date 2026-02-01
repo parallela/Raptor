@@ -135,21 +135,21 @@
     }
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4 md:space-y-6">
     <!-- Header -->
-    <div class="flex items-center justify-between">
-        <div class="flex items-center gap-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 md:gap-4">
             <a href="/admin" class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors duration-200">
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
             </a>
             <div>
-                <h1 class="section-title">Network Allocations</h1>
-                <p class="section-subtitle">Manage IP addresses and port assignments</p>
+                <h1 class="text-xl md:text-2xl font-bold text-white">Network Allocations</h1>
+                <p class="text-sm text-dark-400">Manage IP addresses and port assignments</p>
             </div>
         </div>
-        <button on:click={() => showCreate = true} class="btn-primary">
+        <button on:click={() => showCreate = true} class="btn-primary w-full sm:w-auto">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
@@ -354,7 +354,61 @@
             </div>
         </div>
     {:else}
-        <div class="table-container">
+        <!-- Mobile Card View -->
+        <div class="md:hidden space-y-3">
+            {#each allocations as alloc, i}
+                <div class="card p-4 animate-slide-up" style="animation-delay: {i * 30}ms;">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3" />
+                                </svg>
+                            </div>
+                            <div>
+                                <code class="text-sm font-mono text-white">{alloc.ip}:{alloc.port}</code>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <span class="px-2 py-0.5 rounded text-xs font-mono uppercase {
+                                        alloc.protocol === 'both'
+                                            ? 'bg-purple-500/20 text-purple-400'
+                                            : alloc.protocol === 'udp'
+                                                ? 'bg-amber-500/20 text-amber-400'
+                                                : 'bg-blue-500/20 text-blue-400'
+                                    }">{alloc.protocol === 'both' ? 'TCP+UDP' : (alloc.protocol || 'tcp')}</span>
+                                    {#if alloc.containerId}
+                                        <span class="badge-warning text-xs">In Use</span>
+                                    {:else}
+                                        <span class="badge-success text-xs">Available</span>
+                                    {/if}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 pt-3 border-t border-dark-700/50 flex items-center justify-between">
+                        <span class="text-xs text-dark-400">{getDaemonName(alloc.daemonId)}</span>
+                        <div class="flex gap-2">
+                            <button on:click={() => openEditModal(alloc)} class="btn-ghost btn-sm">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                </svg>
+                            </button>
+                            <button on:click={() => deleteAllocation(alloc.id)} class="btn-ghost btn-sm text-red-400 hover:text-red-300">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            {:else}
+                <div class="card p-8 text-center">
+                    <p class="text-dark-400">No allocations found</p>
+                </div>
+            {/each}
+        </div>
+
+        <!-- Desktop Table View -->
+        <div class="hidden md:block table-container">
             <table class="table">
                 <thead>
                     <tr>

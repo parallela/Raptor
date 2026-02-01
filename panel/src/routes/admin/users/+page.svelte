@@ -82,21 +82,21 @@
     }
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4 md:space-y-6">
     <!-- Header -->
-    <div class="flex items-center justify-between">
-        <div class="flex items-center gap-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 md:gap-4">
             <a href="/admin" class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors duration-200">
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
             </a>
             <div>
-                <h1 class="section-title">User Management</h1>
-                <p class="section-subtitle">View and manage registered users</p>
+                <h1 class="text-xl md:text-2xl font-bold text-white">User Management</h1>
+                <p class="text-sm text-dark-400">View and manage registered users</p>
             </div>
         </div>
-        <button on:click={() => showInviteModal = true} class="btn-primary">
+        <button on:click={() => showInviteModal = true} class="btn-primary w-full sm:w-auto">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
             </svg>
@@ -121,7 +121,41 @@
             </div>
         </div>
     {:else if users.length > 0}
-        <div class="table-container">
+        <!-- Mobile Card View -->
+        <div class="md:hidden space-y-3">
+            {#each users as u, i}
+                <div class="card p-4 animate-slide-up" style="animation-delay: {i * 30}ms;">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold">
+                                {u.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                                <p class="font-medium text-white">{u.username}</p>
+                                <span class="{u.roleName === 'admin' ? 'badge-warning' : 'badge-neutral'} text-xs">
+                                    {u.roleName || 'User'}
+                                </span>
+                            </div>
+                        </div>
+                        <button
+                            on:click={() => deleteUser(u.id, u.username)}
+                            class="btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                            disabled={u.id === $user?.id}
+                        >
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="mt-2 pt-2 border-t border-dark-700/50">
+                        <code class="text-xs bg-dark-800 px-2 py-1 rounded text-dark-400">{u.id.slice(0, 20)}...</code>
+                    </div>
+                </div>
+            {/each}
+        </div>
+
+        <!-- Desktop Table View -->
+        <div class="hidden md:block table-container">
             <table class="table">
                 <thead>
                     <tr>

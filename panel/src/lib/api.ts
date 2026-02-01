@@ -334,7 +334,7 @@ export const api = {
         request<any>(`/admin/database-servers/${id}/restart`, { method: 'POST' }),
 };
 
-export function createWebSocket(containerId: string, sinceMinutes: number = 10): WebSocket {
+export function createWebSocket(containerId: string, sinceMinutes: number = 30): WebSocket {
     const t = get(token);
     const apiUrl = getApiUrl();
     let wsUrl: string;

@@ -44,11 +44,11 @@
     $: usedCpu = daemons.reduce((sum, d) => sum + (d.usedCpu || 0), 0);
 </script>
 
-<div class="space-y-8">
+<div class="space-y-6 md:space-y-8">
     <!-- Header -->
     <div>
-        <h1 class="section-title">Admin Dashboard</h1>
-        <p class="section-subtitle">Manage servers, users, and system resources</p>
+        <h1 class="text-xl md:text-2xl font-bold text-white">Admin Dashboard</h1>
+        <p class="text-sm text-dark-400">Manage servers, users, and system resources</p>
     </div>
 
     {#if loading}
@@ -129,7 +129,7 @@
         </div>
 
         <!-- Quick Links -->
-        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <div class="grid gap-3 md:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <a href="/admin/servers" class="card-hover p-6 group">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500/20 to-primary-600/10 flex items-center justify-center group-hover:from-primary-500/30 group-hover:to-primary-600/20 transition-all duration-300">

@@ -196,17 +196,24 @@
     <title>Flakes - Raptor Panel</title>
 </svelte:head>
 
-<div class="p-6 max-w-7xl mx-auto">
-    <div class="flex justify-between items-center mb-6">
-        <div>
-            <h1 class="text-2xl font-bold text-white">Flakes</h1>
-            <p class="text-dark-400 text-sm">Server templates (like Pterodactyl Eggs)</p>
+<div class="space-y-4 md:space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 md:gap-4">
+            <a href="/admin" class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors duration-200">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                </svg>
+            </a>
+            <div>
+                <h1 class="text-xl md:text-2xl font-bold text-white">Flakes</h1>
+                <p class="text-sm text-dark-400">Server templates (like Pterodactyl Eggs)</p>
+            </div>
         </div>
         <div class="flex gap-2">
-            <button on:click={() => showImportModal = true} class="btn-secondary">
-                Import Flake
+            <button on:click={() => showImportModal = true} class="btn-secondary flex-1 sm:flex-initial">
+                Import
             </button>
-            <button on:click={() => showCreateModal = true} class="btn-primary">
+            <button on:click={() => showCreateModal = true} class="btn-primary flex-1 sm:flex-initial">
                 Create Flake
             </button>
         </div>
@@ -221,26 +228,26 @@
             <p class="text-dark-400">No flakes yet. Create one or import a flake.</p>
         </div>
     {:else}
-        <div class="grid gap-4">
+        <div class="grid gap-3 md:gap-4">
             {#each flakes as flake}
-                <div class="bg-dark-800 rounded-lg p-4 hover:bg-dark-750 transition-colors">
-                    <div class="flex justify-between items-start">
-                        <div class="flex-1">
-                            <div class="flex items-center gap-2">
-                                <h3 class="text-lg font-semibold text-white">{flake.name}</h3>
+                <div class="card p-4 hover:bg-dark-750 transition-colors">
+                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <h3 class="text-base md:text-lg font-semibold text-white">{flake.name}</h3>
                                 <span class="px-2 py-0.5 text-xs bg-dark-700 text-dark-300 rounded">{flake.slug}</span>
                             </div>
                             {#if flake.description}
-                                <p class="text-dark-400 text-sm mt-1">{flake.description}</p>
+                                <p class="text-dark-400 text-sm mt-1 line-clamp-2">{flake.description}</p>
                             {/if}
-                            <div class="flex items-center gap-4 mt-2 text-xs text-dark-500">
-                                <span>Image: <code class="text-primary-400">{flake.dockerImage}</code></span>
+                            <div class="flex flex-wrap items-center gap-2 md:gap-4 mt-2 text-xs text-dark-500">
+                                <span class="truncate">Image: <code class="text-primary-400">{flake.dockerImage}</code></span>
                                 {#if flake.author}
                                     <span>by {flake.author}</span>
                                 {/if}
                             </div>
                         </div>
-                        <div class="flex gap-2">
+                        <div class="flex gap-2 flex-shrink-0">
                             <button on:click={() => viewFlake(flake.id)} class="btn-sm btn-secondary">
                                 View
                             </button>

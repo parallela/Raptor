@@ -201,15 +201,15 @@
     }
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4 md:space-y-6">
     <!-- Header -->
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-            <h1 class="section-title">Servers</h1>
-            <p class="section-subtitle">Manage your game servers and applications</p>
+            <h1 class="text-xl md:text-2xl font-bold text-white">Servers</h1>
+            <p class="text-sm text-dark-400">Manage your game servers and applications</p>
         </div>
         {#if $canCreateContainers}
-            <button on:click={() => showCreate = true} class="btn-primary">
+            <button on:click={() => showCreate = true} class="btn-primary w-full sm:w-auto">
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
@@ -448,8 +448,87 @@
             </div>
         </div>
     {:else}
-        <!-- Table -->
-        <div class="table-container">
+        <!-- Mobile Cards View -->
+        <div class="md:hidden space-y-3">
+            {#each containers as container, i}
+                <div class="card p-4 animate-slide-up" style="animation-delay: {i * 30}ms;">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex items-center gap-3 min-w-0 flex-1">
+                            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500/20 to-primary-600/10 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+                                </svg>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <a href="/containers/{container.id}" class="font-medium text-white hover:text-primary-400 transition-colors block truncate">
+                                    {container.name}
+                                </a>
+                                <span class="text-xs text-dark-500 truncate block">{container.image.split('/').pop()}</span>
+                            </div>
+                        </div>
+                        <span class={getStatusBadge(container.status)}>
+                            <span class="w-1.5 h-1.5 rounded-full {container.status.toLowerCase() === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-current'}"></span>
+                            {container.status}
+                        </span>
+                    </div>
+
+                    <div class="mt-3 pt-3 border-t border-dark-700/50">
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                            {#if container.allocationIp && container.allocationPort}
+                                <code class="bg-dark-800 px-2 py-1 rounded text-primary-400 font-mono">{container.allocationIp}:{container.allocationPort}</code>
+                            {/if}
+                            <span class="text-dark-400">
+                                <svg class="w-3.5 h-3.5 inline mr-1 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M2 7h20v10H2V7zm2 2v6h16V9H4zm2 1h2v4H6v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4z"/>
+                                </svg>
+                                {container.memoryLimit || 1024} MB
+                            </span>
+                            <span class="text-dark-400">
+                                <svg class="w-3.5 h-3.5 inline mr-1 text-primary-400" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 18h12V6H6v12zm3-9h6v6H9V9zm-8 0h2v6H1V9zm20 0h2v6h-2V9zM9 1v2h6V1H9zm0 20v2h6v-2H9z"/>
+                                </svg>
+                                {container.cpuLimit || 1}x CPU
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 flex gap-2">
+                        <a href="/containers/{container.id}" class="btn-primary btn-sm flex-1 justify-center">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                            </svg>
+                            Open
+                        </a>
+                        <button on:click={() => startDelete(container.id, container.name)} class="btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            {:else}
+                <div class="card p-8 text-center">
+                    <div class="w-16 h-16 rounded-2xl bg-dark-800 flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white mb-2">No servers yet</h3>
+                    <p class="text-dark-400 text-sm mb-4">Create your first server to get started</p>
+                    {#if $canCreateContainers}
+                        <button on:click={() => showCreate = true} class="btn-primary">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                            </svg>
+                            Create Server
+                        </button>
+                    {/if}
+                </div>
+            {/each}
+        </div>
+
+        <!-- Desktop Table View -->
+        <div class="hidden md:block table-container">
             <table class="table">
                 <thead>
                     <tr>
