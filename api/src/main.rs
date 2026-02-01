@@ -81,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id/allocations/available", get(handlers::containers::get_available_allocations))
         .route("/containers/:id/allocations", post(handlers::containers::add_allocation))
         .route("/containers/:id/allocations/:allocation_id", delete(handlers::containers::remove_allocation))
+        .route("/containers/:id/allocations/:allocation_id/primary", post(handlers::containers::set_primary_allocation))
         .route("/containers/:id/start", post(handlers::containers::start_container))
         .route("/containers/:id/stop", post(handlers::containers::stop_container))
         .route("/containers/:id/restart", post(handlers::containers::restart_container))

@@ -1331,6 +1331,52 @@ pub async fn remove_allocation(
     })))
 }
 
+pub async fn set_primary_allocation(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path((id, allocation_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<serde_json::Value>> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if container.user_id != claims.sub && !claims.is_manager() {
+        return Err(AppError::Unauthorized);
+    }
+
+    let container_allocation: Option<(Uuid, String, i32)> = sqlx::query_as(
+        "SELECT id, ip, port FROM container_allocations WHERE allocation_id = $1 AND container_id = $2"
+    )
+        .bind(allocation_id)
+        .bind(container.id)
+        .fetch_optional(&state.db)
+        .await?;
+
+    if container_allocation.is_none() {
+        return Err(AppError::BadRequest("Allocation not found or doesn't belong to this container".into()));
+    }
+
+    let (ca_id, ip, port) = container_allocation.unwrap();
+
+    sqlx::query("UPDATE container_allocations SET is_primary = FALSE WHERE container_id = $1")
+        .bind(container.id)
+        .execute(&state.db)
+        .await?;
+
+    sqlx::query("UPDATE container_allocations SET is_primary = TRUE WHERE id = $1")
+        .bind(ca_id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(Json(serde_json::json!({
+        "message": "Allocation set as primary",
+        "allocationIp": ip,
+        "allocationPort": port
+    })))
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSftpPasswordRequest {
