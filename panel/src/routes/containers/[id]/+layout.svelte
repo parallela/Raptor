@@ -337,6 +337,10 @@
         : currentPath.includes('/ftp') ? 'ftp'
         : currentPath.includes('/settings') ? 'settings'
         : 'console';
+
+    // Stats visibility - only auto-show on console and settings tabs
+    let statsExpanded = true;
+    $: showStatsPanel = (activeTab === 'console' || activeTab === 'settings') && isRunning && $statsStore;
 </script>
 
 <div class="h-[calc(100vh-4rem)] md:h-[calc(100vh-4rem)] flex flex-col">
@@ -389,59 +393,84 @@
                     </div>
                 </div>
 
-                <!-- Stats Box - Separate element below header -->
-                {#if isRunning && $statsStore}
-                    <div class="mt-3 p-2 md:p-3 bg-dark-800/60 rounded-lg border border-dark-700/50">
-                        <div class="grid grid-cols-4 gap-2 md:gap-4">
-                            <!-- CPU -->
-                            <div class="text-center">
-                                <div class="flex items-center justify-center gap-1 mb-1">
-                                    <svg class="w-4 h-4 text-primary-400" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M6 18h12V6H6v12zm3-9h6v6H9V9zm-8 0h2v6H1V9zm20 0h2v6h-2V9zM9 1v2h6V1H9zm0 20v2h6v-2H9z"/>
-                                    </svg>
-                                    <span class="text-xs text-dark-400 hidden sm:inline">CPU</span>
-                                </div>
-                                <div class="text-sm md:text-base font-semibold text-white">{$statsStore.cpuPercent.toFixed(1)}%</div>
-                                <div class="w-full h-1.5 bg-dark-700 rounded-full mt-1.5 overflow-hidden">
-                                    <div class="h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full transition-all duration-300" style="width: {Math.min($statsStore.cpuPercent, 100)}%"></div>
+                <!-- Stats Box - Collapsible, only on console/settings tabs -->
+                {#if showStatsPanel}
+                    <div class="mt-2 md:mt-3">
+                        <!-- Stats Toggle Header -->
+                        <button
+                            on:click={() => statsExpanded = !statsExpanded}
+                            class="w-full flex items-center justify-between px-2 py-1.5 bg-dark-800/60 rounded-lg border border-dark-700/50 hover:bg-dark-800 transition-colors"
+                        >
+                            <div class="flex items-center gap-2 text-xs text-dark-400">
+                                <svg class="w-3.5 h-3.5 text-primary-400" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M3 13h2v-2H3v2zm4 8h2v-8H7v8zm4-4h2V3h-2v14zm4 4h2v-6h-2v6zm4-8h2v-4h-2v4z"/>
+                                </svg>
+                                <span>Resources</span>
+                                {#if !statsExpanded}
+                                    <span class="text-dark-500">•</span>
+                                    <span class="text-white font-medium">{$statsStore.cpuPercent.toFixed(0)}% CPU</span>
+                                    <span class="text-dark-500">•</span>
+                                    <span class="text-white font-medium">{formatStatsMemory($statsStore.memoryUsage)}</span>
+                                {/if}
+                            </div>
+                            <svg class="w-4 h-4 text-dark-400 transition-transform {statsExpanded ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        <!-- Stats Content -->
+                        {#if statsExpanded}
+                            <div class="mt-1.5 px-2 py-2 bg-dark-800/40 rounded-lg border border-dark-700/30">
+                                <div class="grid grid-cols-4 gap-2 md:gap-3">
+                                    <!-- CPU -->
+                                    <div class="text-center">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <svg class="w-3 h-3 md:w-3.5 md:h-3.5 text-primary-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M6 18h12V6H6v12zm3-9h6v6H9V9zm-8 0h2v6H1V9zm20 0h2v6h-2V9zM9 1v2h6V1H9zm0 20v2h6v-2H9z"/>
+                                            </svg>
+                                            <span class="text-[10px] md:text-xs text-dark-400">CPU</span>
+                                        </div>
+                                        <div class="text-xs md:text-sm font-semibold text-white mt-0.5">{$statsStore.cpuPercent.toFixed(1)}%</div>
+                                        <div class="w-full h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
+                                            <div class="h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full transition-all duration-300" style="width: {Math.min($statsStore.cpuPercent, 100)}%"></div>
+                                        </div>
+                                    </div>
+                                    <!-- Memory -->
+                                    <div class="text-center">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <svg class="w-3 h-3 md:w-3.5 md:h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M2 7h20v10H2V7zm2 2v6h16V9H4zm2 1h2v4H6v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4z"/>
+                                            </svg>
+                                            <span class="text-[10px] md:text-xs text-dark-400">RAM</span>
+                                        </div>
+                                        <div class="text-xs md:text-sm font-semibold text-white mt-0.5">{formatStatsMemory($statsStore.memoryUsage)}</div>
+                                        <div class="w-full h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
+                                            <div class="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-300" style="width: {Math.min($statsStore.memoryPercent, 100)}%"></div>
+                                        </div>
+                                    </div>
+                                    <!-- Network In -->
+                                    <div class="text-center">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <svg class="w-3 h-3 md:w-3.5 md:h-3.5 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 16l-6-6h4V4h4v6h4l-6 6zm-8 2h16v2H4v-2z"/>
+                                            </svg>
+                                            <span class="text-[10px] md:text-xs text-dark-400">In</span>
+                                        </div>
+                                        <div class="text-xs md:text-sm font-semibold text-white mt-0.5">{formatBytes($statsStore.networkRx)}</div>
+                                    </div>
+                                    <!-- Network Out -->
+                                    <div class="text-center">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <svg class="w-3 h-3 md:w-3.5 md:h-3.5 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 8l6 6h-4v6h-4v-6H6l6-6zM4 4h16v2H4V4z"/>
+                                            </svg>
+                                            <span class="text-[10px] md:text-xs text-dark-400">Out</span>
+                                        </div>
+                                        <div class="text-xs md:text-sm font-semibold text-white mt-0.5">{formatBytes($statsStore.networkTx)}</div>
+                                    </div>
                                 </div>
                             </div>
-                            <!-- Memory -->
-                            <div class="text-center">
-                                <div class="flex items-center justify-center gap-1 mb-1">
-                                    <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M2 7h20v10H2V7zm2 2v6h16V9H4zm2 1h2v4H6v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4z"/>
-                                    </svg>
-                                    <span class="text-xs text-dark-400 hidden sm:inline">RAM</span>
-                                </div>
-                                <div class="text-sm md:text-base font-semibold text-white">{formatStatsMemory($statsStore.memoryUsage)}</div>
-                                <div class="w-full h-1.5 bg-dark-700 rounded-full mt-1.5 overflow-hidden">
-                                    <div class="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-300" style="width: {Math.min($statsStore.memoryPercent, 100)}%"></div>
-                                </div>
-                            </div>
-                            <!-- Network In -->
-                            <div class="text-center">
-                                <div class="flex items-center justify-center gap-1 mb-1">
-                                    <svg class="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M12 16l-6-6h4V4h4v6h4l-6 6zm-8 2h16v2H4v-2z"/>
-                                    </svg>
-                                    <span class="text-xs text-dark-400 hidden sm:inline">Down</span>
-                                </div>
-                                <div class="text-sm md:text-base font-semibold text-white">{formatBytes($statsStore.networkRx)}</div>
-                                <div class="text-xs text-dark-500 mt-1 hidden sm:block">received</div>
-                            </div>
-                            <!-- Network Out -->
-                            <div class="text-center">
-                                <div class="flex items-center justify-center gap-1 mb-1">
-                                    <svg class="w-4 h-4 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M12 8l6 6h-4v6h-4v-6H6l6-6zM4 4h16v2H4V4z"/>
-                                    </svg>
-                                    <span class="text-xs text-dark-400 hidden sm:inline">Up</span>
-                                </div>
-                                <div class="text-sm md:text-base font-semibold text-white">{formatBytes($statsStore.networkTx)}</div>
-                                <div class="text-xs text-dark-500 mt-1 hidden sm:block">sent</div>
-                            </div>
-                        </div>
+                        {/if}
                     </div>
                 {/if}
 
