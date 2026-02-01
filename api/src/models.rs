@@ -5,6 +5,11 @@ use uuid::Uuid;
 
 use crate::config::Config;
 
+/// Default protocol for port mappings
+fn default_protocol() -> String {
+    "tcp".to_string()
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,

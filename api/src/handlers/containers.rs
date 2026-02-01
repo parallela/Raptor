@@ -14,7 +14,7 @@ use crate::models::{AppState, Claims, Container, ContainerPort, CreateContainerR
 
 /// Create HTTP client for daemon communication
 /// Accepts self-signed certificates for internal daemon communication
-fn daemon_client() -> reqwest::Client {
+pub fn daemon_client() -> reqwest::Client {
     reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(30))
