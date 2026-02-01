@@ -81,6 +81,7 @@ export interface Allocation {
     daemonId: string;
     ip: string;
     port: number;
+    protocol: string;
     containerId?: string;
     createdAt: string;
     updatedAt: string;

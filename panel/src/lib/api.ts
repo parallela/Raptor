@@ -175,8 +175,10 @@ export const api = {
     // Allocations
     listAllocations: () => request<Allocation[]>('/allocations'),
     listAllAllocations: () => request<Allocation[]>('/allocations/all'),
-    createAllocation: (data: { daemonId: string; ip: string; port: number }) =>
+    createAllocation: (data: { daemonId: string; ip: string; port: number; protocol?: string }) =>
         request<Allocation>('/allocations', { method: 'POST', body: JSON.stringify(data) }),
+    updateAllocation: (id: string, data: { protocol?: string }) =>
+        request<Allocation>(`/allocations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteAllocation: (id: string) => request<void>(`/allocations/${id}`, { method: 'DELETE' }),
 
     // Users

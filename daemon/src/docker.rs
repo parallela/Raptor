@@ -1011,6 +1011,9 @@ impl DockerManager {
             };
 
             // Memory usage
+            // Note: This is the raw cgroup memory usage which includes cache.
+            // Docker's `docker stats` subtracts inactive_file, but bollard 0.16 doesn't expose that field.
+            // For accurate memory reporting matching `docker stats`, consider upgrading to bollard 0.18+
             let memory_usage = stats.memory_stats.usage.unwrap_or(0);
             let memory_limit = stats.memory_stats.limit.unwrap_or(1);
             let memory_percent = (memory_usage as f64 / memory_limit as f64) * 100.0;

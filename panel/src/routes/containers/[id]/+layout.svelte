@@ -39,6 +39,11 @@
     // Flag to prevent WebSocket reconnection after explicit stop
     let intentionalStop = false;
 
+    // Flag to track if page is visible (prevent reconnect spam when switching tabs)
+    let isPageVisible = true;
+    // Track if we've already shown the "connected" message for current session
+    let hasShownConnectedMessage = false;
+
     // Expose stores and methods to child components
     setContext('container', containerStore);
     setContext('ports', portsStore);
@@ -73,8 +78,16 @@
         connectWebSocket();
         connectStatsWebSocket();
         statusInterval = setInterval(async () => {
-            await loadContainer();
+            // Only poll status if page is visible
+            if (isPageVisible) {
+                await loadContainer();
+            }
         }, 10000);
+
+        // Handle page visibility changes to prevent log spam when switching tabs
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
     });
 
     onDestroy(() => {
@@ -83,7 +96,29 @@
         if (statusInterval) clearInterval(statusInterval);
         if (wsReconnectTimeout) clearTimeout(wsReconnectTimeout);
         if (statsReconnectTimeout) clearTimeout(statsReconnectTimeout);
+        if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        }
     });
+
+    function handleVisibilityChange() {
+        isPageVisible = !document.hidden;
+
+        if (isPageVisible) {
+            // Page became visible - check if we need to reconnect
+            if ($containerStore?.status?.toLowerCase() === 'running') {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    // Silent reconnect - don't spam "connected" messages on tab switch
+                    connectWebSocket(false, true);
+                }
+                if (!statsWs || statsWs.readyState !== WebSocket.OPEN) {
+                    connectStatsWebSocket();
+                }
+            }
+            // Refresh container status
+            loadContainer();
+        }
+    }
 
     async function loadContainer() {
         try {
@@ -130,6 +165,9 @@
         statsWs.onerror = () => console.debug('Stats WebSocket error');
 
         statsWs.onclose = () => {
+            // Don't reconnect if page is not visible
+            if (!isPageVisible) return;
+
             if ($containerStore?.status?.toLowerCase() === 'running') {
                 statsReconnectTimeout = setTimeout(connectStatsWebSocket, 5000);
             } else {
@@ -138,7 +176,14 @@
         };
     }
 
-    function connectWebSocket(clearLogs = false) {
+    function connectWebSocket(clearLogs = false, silent = false) {
+        // Close existing WebSocket if any
+        if (ws) {
+            ws.onclose = null;
+            ws.close();
+            ws = null;
+        }
+
         ws = createWebSocket(containerId);
         if (!ws) return;
 
@@ -146,10 +191,14 @@
             if (clearLogs) {
                 // Clear logs when explicitly starting fresh (e.g., after start button)
                 logsStore.set(['\x1b[32m● Connected to server console\x1b[0m']);
-            } else {
+                hasShownConnectedMessage = true;
+            } else if (!silent && !hasShownConnectedMessage) {
+                // Only show connected message if not silent and haven't shown before
                 logsStore.update(logs => [...logs, '\x1b[32m● Connected to server console\x1b[0m']);
+                logsStore.update(logs => [...logs, `\x1b[32m● Connected to container: ${containerId}\x1b[0m`]);
+                hasShownConnectedMessage = true;
             }
-            logsStore.update(logs => [...logs, `\x1b[32m● Connected to container: ${containerId}\x1b[0m`]);
+            // For silent reconnects (tab switches), don't add any messages
         };
 
         ws.onmessage = (event) => {
@@ -170,16 +219,23 @@
             if (intentionalStop) {
                 logsStore.update(logs => [...logs, '\x1b[31m● Container stopped\x1b[0m']);
                 statsStore.set(null);
+                hasShownConnectedMessage = false;
+                return;
+            }
+
+            // If page is not visible, don't reconnect or show messages
+            if (!isPageVisible) {
                 return;
             }
 
             loadContainer().then(() => {
                 if ($containerStore?.status?.toLowerCase() === 'running' && (!ws || ws.readyState === WebSocket.CLOSED)) {
                     logsStore.update(logs => [...logs, '\x1b[33m● Console connection lost, reconnecting...\x1b[0m']);
-                    wsReconnectTimeout = setTimeout(connectWebSocket, 3000);
+                    wsReconnectTimeout = setTimeout(() => connectWebSocket(false, false), 3000);
                 } else if ($containerStore?.status?.toLowerCase() !== 'running') {
                     logsStore.update(logs => [...logs, '\x1b[31m● Container stopped\x1b[0m']);
                     statsStore.set(null);
+                    hasShownConnectedMessage = false;
                 }
             });
         };
@@ -263,6 +319,10 @@
         }
         if (wsReconnectTimeout) clearTimeout(wsReconnectTimeout);
         if (statsReconnectTimeout) clearTimeout(statsReconnectTimeout);
+
+        // Reset the connected message flag so we show it again after explicit start/restart
+        hasShownConnectedMessage = false;
+
         setTimeout(() => {
             connectWebSocket();
             connectStatsWebSocket();

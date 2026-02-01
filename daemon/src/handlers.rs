@@ -265,17 +265,36 @@ pub async fn create_container(
     // Build port bindings - multiple allocations can map to the same internal port
     let mut port_bindings: HashMap<String, Vec<PortBinding>> = HashMap::new();
 
-    // Handle multiple allocations (new model)
-    for alloc in &req.allocations {
-        let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
-        tracing::info!("Adding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
-        port_bindings
+    // Helper to add port binding for a protocol
+    let add_binding = |bindings: &mut HashMap<String, Vec<PortBinding>>, internal_port: i32, protocol: &str, ip: &str, port: i32| {
+        let key = format!("{}/{}", internal_port, protocol);
+        bindings
             .entry(key)
             .or_insert_with(Vec::new)
             .push(PortBinding {
-                host_ip: Some(alloc.ip.clone()),
-                host_port: Some(alloc.port.to_string()),
+                host_ip: Some(ip.to_string()),
+                host_port: Some(port.to_string()),
             });
+    };
+
+    // Handle multiple allocations (new model)
+    for alloc in &req.allocations {
+        if alloc.protocol == "both" {
+            // Bind both TCP and UDP on the same port
+            tracing::info!("Adding allocation (both): {}/tcp and {}/udp -> {}:{}", alloc.internal_port, alloc.internal_port, alloc.ip, alloc.port);
+            add_binding(&mut port_bindings, alloc.internal_port, "tcp", &alloc.ip, alloc.port);
+            add_binding(&mut port_bindings, alloc.internal_port, "udp", &alloc.ip, alloc.port);
+        } else {
+            let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
+            tracing::info!("Adding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
+            port_bindings
+                .entry(key)
+                .or_insert_with(Vec::new)
+                .push(PortBinding {
+                    host_ip: Some(alloc.ip.clone()),
+                    host_port: Some(alloc.port.to_string()),
+                });
+        }
     }
 
     // Legacy single allocation support
@@ -534,15 +553,30 @@ pub async fn start_container(
         let mut port_bindings: HashMap<String, Vec<PortBinding>> = HashMap::new();
 
         for alloc in &container.allocations {
-            let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
-            tracing::info!("Binding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
-            port_bindings
-                .entry(key)
-                .or_insert_with(Vec::new)
-                .push(PortBinding {
-                    host_ip: Some(alloc.ip.clone()),
-                    host_port: Some(alloc.port.to_string()),
-                });
+            if alloc.protocol == "both" {
+                // Bind both TCP and UDP on the same port
+                tracing::info!("Binding allocation (both): {}/tcp and {}/udp -> {}:{}", alloc.internal_port, alloc.internal_port, alloc.ip, alloc.port);
+                for proto in &["tcp", "udp"] {
+                    let key = format!("{}/{}", alloc.internal_port, proto);
+                    port_bindings
+                        .entry(key)
+                        .or_insert_with(Vec::new)
+                        .push(PortBinding {
+                            host_ip: Some(alloc.ip.clone()),
+                            host_port: Some(alloc.port.to_string()),
+                        });
+                }
+            } else {
+                let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
+                tracing::info!("Binding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
+                port_bindings
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .push(PortBinding {
+                        host_ip: Some(alloc.ip.clone()),
+                        host_port: Some(alloc.port.to_string()),
+                    });
+            }
         }
 
         // Legacy allocation support
@@ -709,17 +743,32 @@ pub async fn recreate_container(
     let mut port_bindings: HashMap<String, Vec<PortBinding>> = HashMap::new();
 
     for alloc in &container.allocations {
-        let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
-        tracing::info!("Adding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
+        if alloc.protocol == "both" {
+            // Bind both TCP and UDP on the same port
+            tracing::info!("Adding allocation (both): {}/tcp and {}/udp -> {}:{}", alloc.internal_port, alloc.internal_port, alloc.ip, alloc.port);
+            for proto in &["tcp", "udp"] {
+                let key = format!("{}/{}", alloc.internal_port, proto);
+                port_bindings
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .push(PortBinding {
+                        host_ip: Some(alloc.ip.clone()),
+                        host_port: Some(alloc.port.to_string()),
+                    });
+            }
+        } else {
+            let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
+            tracing::info!("Adding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
 
-        // Append to existing bindings for this port (don't replace)
-        port_bindings
-            .entry(key)
-            .or_insert_with(Vec::new)
-            .push(PortBinding {
-                host_ip: Some(alloc.ip.clone()),
-                host_port: Some(alloc.port.to_string()),
-            });
+            // Append to existing bindings for this port (don't replace)
+            port_bindings
+                .entry(key)
+                .or_insert_with(Vec::new)
+                .push(PortBinding {
+                    host_ip: Some(alloc.ip.clone()),
+                    host_port: Some(alloc.port.to_string()),
+                });
+        }
     }
 
     // Legacy allocation support

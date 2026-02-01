@@ -167,7 +167,15 @@
                             <div class="flex items-center justify-between bg-dark-900/50 rounded-lg p-3">
                                 <div class="flex items-center gap-3">
                                     <code class="text-primary-400 font-mono text-sm">{alloc.ip}:{alloc.port}</code>
-                                    <span class="text-xs text-dark-500 font-mono">{alloc.protocol}</span>
+                                    <span class="text-xs font-mono px-1.5 py-0.5 rounded {
+                                        alloc.protocol === 'both'
+                                            ? 'bg-purple-500/20 text-purple-400'
+                                            : alloc.protocol === 'udp'
+                                                ? 'bg-amber-500/20 text-amber-400'
+                                                : 'bg-blue-500/20 text-blue-400'
+                                    }">
+                                        {alloc.protocol === 'both' ? 'TCP+UDP' : alloc.protocol}
+                                    </span>
                                     {#if alloc.isPrimary}
                                         <span class="text-xs bg-primary-500/20 text-primary-400 px-2 py-0.5 rounded">Primary</span>
                                     {/if}

@@ -17,6 +17,7 @@
         daemonId: '',
         ip: '',
         port: 25565,
+        protocol: 'tcp',
     };
 
     onMount(async () => {
@@ -48,9 +49,10 @@
                 daemonId: newAllocation.daemonId,
                 ip: newAllocation.ip,
                 port: newAllocation.port,
+                protocol: newAllocation.protocol,
             });
             showCreate = false;
-            newAllocation = { daemonId: '', ip: '', port: 25565 };
+            newAllocation = { daemonId: '', ip: '', port: 25565, protocol: 'tcp' };
             await loadData();
             toast.success('Allocation created successfully');
         } catch (e: any) {
@@ -68,6 +70,24 @@
             toast.success('Allocation deleted successfully');
         } catch (e: any) {
             toast.error(e.message || 'Failed to delete allocation');
+        }
+    }
+
+    async function toggleProtocol(alloc: Allocation) {
+        // Cycle: tcp -> udp -> both -> tcp
+        const protocolCycle: Record<string, string> = {
+            'tcp': 'udp',
+            'udp': 'both',
+            'both': 'tcp'
+        };
+        const currentProtocol = alloc.protocol || 'tcp';
+        const newProtocol = protocolCycle[currentProtocol] || 'tcp';
+        try {
+            await api.updateAllocation(alloc.id, { protocol: newProtocol });
+            await loadData();
+            toast.success(`Protocol changed to ${newProtocol.toUpperCase()}`);
+        } catch (e: any) {
+            toast.error(e.message || 'Failed to update protocol');
         }
     }
 
@@ -146,6 +166,21 @@
                         </div>
                     </div>
 
+                    <div class="input-group">
+                        <label for="protocol" class="input-label">Protocol</label>
+                        <Select
+                            id="protocol"
+                            bind:value={newAllocation.protocol}
+                            options={[
+                                { value: 'tcp', label: 'TCP only' },
+                                { value: 'udp', label: 'UDP only' },
+                                { value: 'both', label: 'TCP + UDP (both protocols)' },
+                            ]}
+                            required
+                        />
+                        <p class="text-xs text-dark-500 mt-1">Most games use TCP. Some (like Hytale) need UDP. Use "both" if unsure.</p>
+                    </div>
+
                     <div class="flex gap-3 pt-4">
                         <button type="submit" class="btn-success flex-1" disabled={creating}>
                             {#if creating}
@@ -180,6 +215,7 @@
                 <thead>
                     <tr>
                         <th>Address</th>
+                        <th>Protocol</th>
                         <th>Node</th>
                         <th>Status</th>
                         <th class="text-right">Actions</th>
@@ -197,6 +233,22 @@
                                     </div>
                                     <code class="text-sm font-mono text-white">{alloc.ip}:{alloc.port}</code>
                                 </div>
+                            </td>
+                            <td>
+                                <button
+                                    on:click={() => toggleProtocol(alloc)}
+                                    class="px-2 py-1 rounded text-xs font-mono uppercase cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-offset-dark-900 transition-all {
+                                        alloc.protocol === 'both' 
+                                            ? 'bg-purple-500/20 text-purple-400 hover:ring-purple-500/50' 
+                                            : alloc.protocol === 'udp' 
+                                                ? 'bg-amber-500/20 text-amber-400 hover:ring-amber-500/50' 
+                                                : 'bg-blue-500/20 text-blue-400 hover:ring-blue-500/50'
+                                    }"
+                                    title="Click to cycle protocol: TCP → UDP → Both → TCP (will take effect on container restart)"
+                                    disabled={!!alloc.containerId}
+                                >
+                                    {alloc.protocol === 'both' ? 'TCP+UDP' : (alloc.protocol || 'tcp')}
+                                </button>
                             </td>
                             <td class="text-dark-300">{getDaemonName(alloc.daemonId)}</td>
                             <td>
@@ -230,7 +282,7 @@
                         </tr>
                     {:else}
                         <tr>
-                            <td colspan="4">
+                            <td colspan="5">
                                 <div class="py-12 text-center">
                                     <div class="w-16 h-16 rounded-2xl bg-dark-800 flex items-center justify-center mx-auto mb-4">
                                         <svg class="w-8 h-8 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">

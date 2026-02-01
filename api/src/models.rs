@@ -129,8 +129,14 @@ pub struct Allocation {
     pub daemon_id: Uuid,
     pub ip: String,
     pub port: i32,
+    #[serde(default = "default_tcp")]
+    pub protocol: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn default_tcp() -> String {
+    "tcp".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -169,17 +175,11 @@ pub struct CreateIpPoolRequest {
     pub is_primary: Option<bool>,
 }
 
-fn default_protocol() -> String {
-    "tcp".to_string()
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateContainerAllocationRequest {
     pub container_id: Uuid,
     pub allocation_id: Uuid,
-    #[serde(default = "default_protocol")]
-    pub protocol: String,
     pub is_primary: Option<bool>,
 }
 
@@ -358,6 +358,7 @@ pub struct CreateAllocationRequest {
     pub daemon_id: Uuid,
     pub ip: String,
     pub port: i32,
+    pub protocol: Option<String>,
 }
 
 // JWT Claims

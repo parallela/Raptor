@@ -25,10 +25,8 @@ pub struct Flake {
     pub install_entrypoint: Option<String>,
     pub features: serde_json::Value,
     pub file_denylist: serde_json::Value,
-    /// Docker restart policy: "no", "always", "on-failure", "unless-stopped"
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
-    /// Whether to allocate a TTY for the container (needed for interactive programs)
     #[serde(default)]
     pub tty: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -38,6 +36,7 @@ pub struct Flake {
 fn default_restart_policy() -> String {
     "unless-stopped".to_string()
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]

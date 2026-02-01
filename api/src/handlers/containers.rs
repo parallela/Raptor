@@ -223,7 +223,7 @@ pub async fn create_container(
             "ip": allocation.ip,
             "port": allocation.port,
             "internalPort": allocation.port,
-            "protocol": "tcp",
+            "protocol": allocation.protocol,
             "isPrimary": true
         }));
     }
@@ -245,7 +245,7 @@ pub async fn create_container(
             "ip": allocation.ip,
             "port": allocation.port,
             "internalPort": allocation.port,
-            "protocol": "tcp",
+            "protocol": allocation.protocol,
             "isPrimary": false
         }));
     }
@@ -1280,15 +1280,10 @@ pub async fn get_container_allocations(
 #[serde(rename_all = "camelCase")]
 pub struct AddAllocationRequest {
     pub allocation_id: Uuid,
-    #[serde(default = "default_tcp")]
-    pub protocol: String,
     #[serde(default)]
     pub is_primary: bool,
 }
 
-fn default_tcp() -> String {
-    "tcp".to_string()
-}
 
 pub async fn add_allocation(
     State(state): State<AppState>,
@@ -1348,7 +1343,7 @@ pub async fn add_allocation(
 
     let is_primary = req.is_primary || has_allocations.map(|c| c.0 == 0).unwrap_or(true);
 
-    // Create container_allocation entry
+    // Create container_allocation entry - use protocol from the allocation
     sqlx::query(
         r#"INSERT INTO container_allocations (id, container_id, allocation_id, ip, port, internal_port, protocol, is_primary, created_at)
            VALUES ($1, $2, $3, $4, $5, $5, $6, $7, NOW())"#
@@ -1358,7 +1353,7 @@ pub async fn add_allocation(
         .bind(req.allocation_id)
         .bind(&allocation.ip)
         .bind(allocation.port)
-        .bind(&req.protocol)
+        .bind(&allocation.protocol)
         .bind(is_primary)
         .execute(&state.db)
         .await?;
