@@ -80,7 +80,7 @@
             <div class="p-4 space-y-4">
                 <div class="grid gap-4 sm:grid-cols-2">
                     <div>
-                        <label class="block text-xs text-dark-400 uppercase mb-1">Host</label>
+                        <span class="block text-xs text-dark-400 uppercase mb-1">Host</span>
                         <div class="flex items-center gap-2">
                             <code class="flex-1 bg-dark-800 text-white px-3 py-2 rounded text-sm font-mono">{ftpHost}</code>
                             <button
