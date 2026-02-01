@@ -49,6 +49,42 @@
 
 ---
 
+## 📸 Screenshots
+
+### Desktop Interface
+
+<p align="center">
+  <img src="img/dashboard.png" alt="Dashboard" width="45%" />
+  <img src="img/console.png" alt="Console" width="45%" />
+</p>
+
+<p align="center">
+  <img src="img/files.png" alt="File Manager" width="45%" />
+  <img src="img/console-2.png" alt="Console with Stats" width="45%" />
+</p>
+
+<p align="center">
+  <img src="img/admin.png" alt="Admin Panel" width="45%" />
+  <img src="img/databases.png" alt="Database Management" width="45%" />
+</p>
+
+### Mobile Interface
+
+<p align="center">
+  <img src="img/mobile-servers.jpg" alt="Mobile Servers" width="18%" />
+  <img src="img/mobile-console.jpg" alt="Mobile Console" width="18%" />
+  <img src="img/mobile-files.png" alt="Mobile Files" width="18%" />
+  <img src="img/mobile-menu.jpg" alt="Mobile Menu" width="18%" />
+  <img src="img/mobile-settings.png" alt="Mobile Settings" width="18%" />
+</p>
+
+<p align="center">
+  <img src="img/mobile-admin.png" alt="Mobile Admin" width="18%" />
+  <img src="img/mobile-databases.png" alt="Mobile Databases" width="18%" />
+</p>
+
+---
+
 ## 🏗️ Architecture
 
 ```
