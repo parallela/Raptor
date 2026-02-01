@@ -232,7 +232,7 @@
                         </div>
                         <div>
                             <label for="cpuLimit" class="text-dark-400 text-sm block mb-1">CPU Limit (cores)</label>
-                            <input id="cpuLimit" type="number" bind:value={editCpu} min="0.1" step="0.1" class="input w-full" placeholder="e.g., 1.0" />
+                            <input id="cpuLimit" type="number" bind:value={editCpu} min="1" step="1" class="input w-full" placeholder="e.g., 1" />
                         </div>
                         <div>
                             <label for="diskSpace" class="text-dark-400 text-sm block mb-1">Disk Space (MB)</label>

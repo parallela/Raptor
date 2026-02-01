@@ -31,7 +31,7 @@
         allocationId: '',
         memoryLimit: 1280,
         serverMemory: 1024,
-        cpuLimit: 1.0,
+        cpuLimit: 1,
         diskLimit: 5120,
         userId: ''
     };
@@ -112,7 +112,7 @@
 
             await api.createContainer(payload as any);
             showCreate = false;
-            newContainer = { daemonId: '', name: '', flakeId: '', image: '', startupScript: '', allocationId: '', memoryLimit: 1280, serverMemory: 1024, cpuLimit: 1.0, diskLimit: 5120, userId: '' };
+            newContainer = { daemonId: '', name: '', flakeId: '', image: '', startupScript: '', allocationId: '', memoryLimit: 1280, serverMemory: 1024, cpuLimit: 1, diskLimit: 5120, userId: '' };
             selectedFlake = null;
             flakeVariables = {};
             selectedUser = null;
@@ -373,7 +373,7 @@
                         </div>
                         <div class="input-group">
                             <label for="cpu" class="input-label">CPU Cores</label>
-                            <input type="number" id="cpu" bind:value={newContainer.cpuLimit} class="input" min="0.1" step="0.1" required />
+                            <input type="number" id="cpu" bind:value={newContainer.cpuLimit} class="input" min="1" step="1" required />
                         </div>
                         <div class="input-group">
                             <label for="disk" class="input-label">Disk (MB)</label>
