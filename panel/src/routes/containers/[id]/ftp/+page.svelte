@@ -100,7 +100,7 @@
                         </div>
                     </div>
                     <div>
-                        <label class="block text-xs text-dark-400 uppercase mb-1">Port</label>
+                        <span class="block text-xs text-dark-400 uppercase mb-1">Port</span>
                         <div class="flex items-center gap-2">
                             <code class="flex-1 bg-dark-800 text-white px-3 py-2 rounded text-sm font-mono">{ftpPort}</code>
                             <button
@@ -122,7 +122,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs text-dark-400 uppercase mb-1">Username</label>
+                    <span class="block text-xs text-dark-400 uppercase mb-1">Username</span>
                     <div class="flex items-center gap-2">
                         <code class="flex-1 bg-dark-800 text-white px-3 py-2 rounded text-sm font-mono">{ftpUsername}</code>
                         <button
@@ -186,7 +186,7 @@
             <h3 class="text-sm font-medium text-white mb-3">Quick Connect</h3>
             <div class="space-y-2">
                 <div>
-                    <label class="block text-xs text-dark-400 mb-1">FTP URL</label>
+                    <span class="block text-xs text-dark-400 mb-1">FTP URL</span>
                     <div class="flex items-center gap-2">
                         <code class="flex-1 bg-dark-800 text-primary-400 px-3 py-2 rounded text-sm font-mono truncate">ftp:
                         <button
