@@ -39,7 +39,6 @@ pub struct PaginatedResponse<T> {
     pub total_pages: i64,
 }
 
-// User with role joined
 #[derive(Debug, sqlx::FromRow)]
 pub struct UserWithRole {
     pub id: Uuid,
@@ -58,12 +57,10 @@ pub async fn list_users(
     let page = params.page.max(1);
     let offset = (page - 1) * per_page;
 
-    // Get total count
     let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
         .fetch_one(&state.db)
         .await?;
 
-    // Use LEFT JOIN to avoid N+1 query
     let users: Vec<UserWithRole> = sqlx::query_as(
         r#"
         SELECT
@@ -107,7 +104,6 @@ pub async fn list_users(
     }))
 }
 
-/// Search users by username or email (for autocomplete)
 pub async fn search_users(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
@@ -155,7 +151,7 @@ pub async fn get_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<UserResponse>> {
-    // Use JOIN to avoid separate query for role
+
     let user: UserWithRole = sqlx::query_as(
         r#"
         SELECT
@@ -197,7 +193,7 @@ pub async fn update_user(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateUserRequest>,
 ) -> AppResult<Json<UserResponse>> {
-    // Update user with a single query
+
     sqlx::query(
         r#"
         UPDATE users SET
@@ -215,7 +211,6 @@ pub async fn update_user(
     .execute(&state.db)
     .await?;
 
-    // Fetch updated user with role using JOIN
     let user: UserWithRole = sqlx::query_as(
         r#"
         SELECT

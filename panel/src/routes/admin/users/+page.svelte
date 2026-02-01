@@ -10,7 +10,6 @@
     let loading = true;
     let error = '';
 
-    // Invite modal state
     let showInviteModal = false;
     let inviteEmail = '';
     let inviteRoleId = '';
@@ -70,7 +69,6 @@
             showInviteModal = false;
             inviteEmail = '';
             inviteRoleId = '';
-            // Copy invite link to clipboard if SMTP not configured
             if (result.token) {
                 const inviteLink = `${window.location.origin}/invite?token=${result.token}`;
                 await navigator.clipboard.writeText(inviteLink);

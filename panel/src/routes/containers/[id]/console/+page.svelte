@@ -16,7 +16,6 @@
     $: logs = $logsStore;
     $: isRunning = container?.status?.toLowerCase() === 'running';
 
-    // Auto-scroll logs only if user hasn't scrolled up
     $: if (logs && logsContainer && !userScrolled) {
         setTimeout(() => {
             logsContainer.scrollTop = logsContainer.scrollHeight;
@@ -26,11 +25,9 @@
     function handleScroll() {
         if (!logsContainer) return;
         const isAtBottom = logsContainer.scrollHeight - logsContainer.scrollTop <= logsContainer.clientHeight + 50;
-        // Detect if user is scrolling up
         if (logsContainer.scrollTop < lastScrollTop && !isAtBottom) {
             userScrolled = true;
         }
-        // Reset if user scrolls to bottom
         if (isAtBottom) {
             userScrolled = false;
         }

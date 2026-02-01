@@ -56,7 +56,6 @@
     }
 
     function handleBlur() {
-        // Delay to allow click on result
         setTimeout(() => {
             showDropdown = false;
         }, 200);

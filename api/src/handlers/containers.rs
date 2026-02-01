@@ -12,8 +12,6 @@ use std::collections::HashMap;
 use crate::error::{AppError, AppResult};
 use crate::models::{AppState, Claims, Container, ContainerPort, CreateContainerRequest, Daemon};
 
-/// Create HTTP client for daemon communication
-/// Accepts self-signed certificates for internal daemon communication
 pub fn daemon_client() -> reqwest::Client {
     reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -22,7 +20,6 @@ pub fn daemon_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// Allocation info for container responses
 #[derive(Debug, Serialize, Clone, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct AllocationInfo {
@@ -41,9 +38,7 @@ pub struct ContainerResponse {
     #[serde(flatten)]
     pub container: Container,
     pub allocations: Vec<AllocationInfo>,
-    /// Primary allocation IP (convenience field)
     pub allocation_ip: Option<String>,
-    /// Primary allocation port (convenience field)
     pub allocation_port: Option<i32>,
 }
 
@@ -66,9 +61,7 @@ pub struct ContainerWithAllocation {
     pub sftp_pass: Option<String>,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
-    /// Primary allocation IP (from container_allocations JOIN allocations)
     pub allocation_ip: Option<String>,
-    /// Primary allocation port
     pub allocation_port: Option<i32>,
 }
 
@@ -130,7 +123,6 @@ pub async fn create_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Load flake if provided
     let (image, startup_script, flake_id, install_script, mut flake_variables, restart_policy, tty) = if let Some(fid) = req.flake_id {
         let flake: crate::handlers::flakes::Flake = sqlx::query_as("SELECT * FROM flakes WHERE id = $1")
             .bind(fid)
@@ -138,7 +130,6 @@ pub async fn create_container(
             .await?
             .ok_or(AppError::BadRequest("Flake not found".into()))?;
 
-        // Get flake variables with defaults
         let vars: Vec<crate::handlers::flakes::FlakeVariable> = sqlx::query_as(
             "SELECT * FROM flake_variables WHERE flake_id = $1 ORDER BY sort_order"
         )
@@ -146,7 +137,6 @@ pub async fn create_container(
             .fetch_all(&state.db)
             .await?;
 
-        // Build environment variables map (defaults + user overrides)
         let mut env_vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for var in &vars {
             let value = req.variables.get(&var.env_variable)
@@ -155,18 +145,11 @@ pub async fn create_container(
             env_vars.insert(var.env_variable.clone(), value);
         }
 
-        // Set SERVER_MEMORY from server_memory (JVM heap) or fall back to memory_limit
-        // server_memory is for the JVM heap (-Xmx), memory_limit is for Docker container limit
         let server_memory = req.server_memory.unwrap_or(req.memory_limit);
         env_vars.insert("SERVER_MEMORY".to_string(), server_memory.to_string());
 
-        // Use user-provided startup_script if present, otherwise use flake's
-        // NOTE: We send the startup script with {{VAR}} placeholders intact.
-        // The daemon will replace them at container start time using the current environment values.
-        // This allows updating memory/variables without recreating the container.
         let startup = req.startup_script.clone()
             .unwrap_or_else(|| flake.startup_command.clone());
-
 
         (
             flake.docker_image,
@@ -178,12 +161,11 @@ pub async fn create_container(
             flake.tty,
         )
     } else {
-        // No flake - require image
+
         let image = req.image.clone().ok_or(AppError::BadRequest("Either flake_id or image is required".into()))?;
         (image, req.startup_script.clone(), None, None, std::collections::HashMap::new(), "unless-stopped".to_string(), false)
     };
 
-    // Generate container UUID first - this will be used as the Docker container name
     let container_id = Uuid::new_v4();
     let container_name_for_docker = container_id.to_string();
 
@@ -198,12 +180,10 @@ pub async fn create_container(
         })
     }).collect();
 
-    // Build allocations array for daemon
     let mut allocations_for_daemon: Vec<serde_json::Value> = Vec::new();
     let mut primary_port: Option<i32> = None;
     let mut primary_ip: Option<String> = None;
 
-    // Add primary allocation if provided
     if let Some(allocation_id) = req.allocation_id {
         let allocation: crate::models::Allocation = sqlx::query_as(
             "SELECT * FROM allocations WHERE id = $1 AND daemon_id = $2"
@@ -228,7 +208,6 @@ pub async fn create_container(
         }));
     }
 
-    // Add additional allocations
     for additional_allocation_id in &req.additional_allocations {
         let allocation: crate::models::Allocation = sqlx::query_as(
             "SELECT * FROM allocations WHERE id = $1 AND daemon_id = $2"
@@ -250,7 +229,6 @@ pub async fn create_container(
         }));
     }
 
-    // Add SERVER_PORT and SERVER_IP to flake_variables from primary allocation
     if let Some(port) = primary_port {
         flake_variables.insert("SERVER_PORT".to_string(), port.to_string());
     }
@@ -258,8 +236,6 @@ pub async fn create_container(
         flake_variables.insert("SERVER_IP".to_string(), ip);
     }
 
-    // Use container UUID as the Docker container name
-    // server_memory is for JVM heap (-Xmx), memory_limit is Docker container limit
     let server_memory = req.server_memory.unwrap_or(req.memory_limit);
 
     let daemon_req = serde_json::json!({
@@ -300,18 +276,14 @@ pub async fn create_container(
 
     let now = Utc::now();
 
-    // Allow admins/managers to assign container to a different user
     let user_id = if claims.is_manager() {
         req.user_id.unwrap_or(claims.sub)
     } else {
         claims.sub
     };
 
-    // Generate FTP username using first 8 chars of container UUID (e.g., c3e12c86)
-    // Password is not set initially - user must set it before using FTP
     let sftp_user = container_id.to_string().replace("-", "")[..8].to_string();
 
-    // Default stop command for Minecraft servers
     let stop_command = req.stop_command.clone().unwrap_or_else(|| "stop".to_string());
 
     let container: Container = sqlx::query_as(
@@ -325,7 +297,7 @@ pub async fn create_container(
     .bind(user_id)
     .bind(req.daemon_id)
     .bind(flake_id)
-    .bind(&req.name)  // Store user-friendly name in DB
+    .bind(&req.name)
     .bind(&image)
     .bind(&startup_script)
     .bind(&stop_command)
@@ -339,14 +311,12 @@ pub async fn create_container(
     .fetch_one(&state.db)
     .await?;
 
-    // Create primary allocation if provided (allocation already validated above when building daemon request)
     if let Some(allocation_id) = req.allocation_id {
-        // Get allocation data from the allocations_for_daemon we already built
+
         if let Some(alloc_json) = allocations_for_daemon.iter().find(|a| a["isPrimary"].as_bool() == Some(true)) {
             let ip = alloc_json["ip"].as_str().unwrap_or("");
             let port = alloc_json["port"].as_i64().unwrap_or(0) as i32;
 
-            // Create container_allocation entry
             sqlx::query(
                 r#"INSERT INTO container_allocations (id, container_id, allocation_id, ip, port, internal_port, protocol, is_primary, created_at)
                    VALUES ($1, $2, $3, $4, $5, $5, 'tcp', TRUE, NOW())"#
@@ -361,9 +331,8 @@ pub async fn create_container(
         }
     }
 
-    // Create additional allocations if provided (already validated above)
     for additional_allocation_id in &req.additional_allocations {
-        // Find matching allocation from allocations_for_daemon
+
         let alloc_id_str = additional_allocation_id.to_string();
         if let Some(alloc_json) = allocations_for_daemon.iter().find(|a| {
             a["allocationId"].as_str() == Some(alloc_id_str.as_str())
@@ -371,7 +340,6 @@ pub async fn create_container(
             let ip = alloc_json["ip"].as_str().unwrap_or("");
             let port = alloc_json["port"].as_i64().unwrap_or(0) as i32;
 
-            // Create container_allocation entry (not primary)
             sqlx::query(
                 r#"INSERT INTO container_allocations (id, container_id, allocation_id, ip, port, internal_port, protocol, is_primary, created_at)
                    VALUES ($1, $2, $3, $4, $5, $5, 'tcp', FALSE, NOW())"#
@@ -419,7 +387,6 @@ pub async fn get_container(
         return Err(AppError::Unauthorized);
     }
 
-    // Get all allocations for this container (ip is now stored directly in container_allocations)
     let allocations: Vec<AllocationInfo> = sqlx::query_as(
         r#"SELECT ca.id, ca.allocation_id, ca.ip, ca.port, ca.internal_port, ca.protocol, COALESCE(ca.is_primary, FALSE) as is_primary
            FROM container_allocations ca
@@ -430,7 +397,6 @@ pub async fn get_container(
         .fetch_all(&state.db)
         .await?;
 
-    // Get primary allocation for convenience fields
     let primary = allocations.iter().find(|a| a.is_primary);
     let allocation_ip = primary.map(|a| a.ip.clone());
     let allocation_port = primary.map(|a| a.port);
@@ -477,7 +443,6 @@ pub async fn delete_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission - only admin/manager or container owner can delete
     if container.user_id != claims.sub && !claims.has_permission("containers.delete") && !claims.is_manager() {
         return Err(AppError::Unauthorized);
     }
@@ -509,10 +474,8 @@ pub async fn delete_container(
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateContainerRequest {
-    /// Docker container memory limit in MB
     #[serde(default)]
     pub memory_limit: Option<i64>,
-    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
     #[serde(default)]
     pub server_memory: Option<i64>,
     #[serde(default)]
@@ -539,7 +502,6 @@ pub async fn update_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check basic permission - owner or manager
     let is_owner = container.user_id == claims.sub;
     let is_manager = claims.has_permission("containers.manage") || claims.is_manager();
 
@@ -547,7 +509,6 @@ pub async fn update_container(
         return Err(AppError::Unauthorized);
     }
 
-    // Check if user is trying to change resource limits
     let changing_resources = req.memory_limit.is_some()
         || req.server_memory.is_some()
         || req.cpu_limit.is_some()
@@ -555,7 +516,6 @@ pub async fn update_container(
         || req.swap_limit.is_some()
         || req.io_weight.is_some();
 
-    // Resource limit changes require special permission (unless manager/admin)
     if changing_resources && !is_manager && !claims.has_permission("containers.edit_resources") {
         return Err(AppError::Forbidden("You don't have permission to change resource limits".into()));
     }
@@ -566,7 +526,6 @@ pub async fn update_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Build update payload for daemon
     let mut daemon_payload = serde_json::json!({});
 
     if let Some(memory) = req.memory_limit {
@@ -588,7 +547,6 @@ pub async fn update_container(
         daemon_payload["ioWeight"] = serde_json::json!(io);
     }
 
-    // Update daemon container resources
     let client = daemon_client();
     let daemon_url = format!("{}/containers/{}", daemon.base_url(), container.id);
 
@@ -603,10 +561,8 @@ pub async fn update_container(
     if !res.status().is_success() {
         let error_text = res.text().await.unwrap_or_default();
         tracing::warn!("Daemon update warning: {}", error_text);
-        // Don't fail - continue to update DB
     }
 
-    // Update database - handle Option fields properly
     let memory_limit = req.memory_limit.or(container.memory_limit);
     let cpu_limit = req.cpu_limit.map(|c| rust_decimal::Decimal::try_from(c).ok()).flatten().or(container.cpu_limit);
     let disk_limit = req.disk_limit.or(container.disk_limit);
@@ -633,9 +589,8 @@ pub async fn update_container(
     .fetch_one(&state.db)
     .await?;
 
-    // Handle allocation update separately via container_allocations if provided
     if let Some(allocation_id) = req.allocation_id {
-        // Remove existing primary and set new one
+
         sqlx::query("DELETE FROM container_allocations WHERE container_id = $1 AND is_primary = TRUE")
             .bind(id)
             .execute(&state.db)
@@ -677,7 +632,6 @@ async fn proxy_container_action(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check if user has permission to manage this container
     let can_manage = container.user_id == claims.sub
         || claims.has_permission("containers.manage")
         || claims.has_permission("containers.manage_own") && container.user_id == claims.sub
@@ -706,7 +660,6 @@ async fn proxy_container_action(
         .await
         .map_err(|e| AppError::Daemon(e.to_string()))?;
 
-    // Determine the correct status based on action
     let status = match action {
         "start" | "restart" => "running",
         "stop" | "kill" => "stopped",
@@ -733,7 +686,6 @@ pub async fn start_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission
     let can_manage = container.user_id == claims.sub
         || claims.has_permission("containers.manage")
         || claims.has_permission("containers.manage_own") && container.user_id == claims.sub
@@ -749,7 +701,6 @@ pub async fn start_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Get all container allocations from DB
     let allocations: Vec<crate::models::ContainerAllocation> = sqlx::query_as(
         r#"SELECT ca.id, ca.container_id, ca.allocation_id, ca.ip, ca.port, ca.internal_port, ca.protocol, COALESCE(ca.is_primary, FALSE) as is_primary, ca.created_at
            FROM container_allocations ca
@@ -766,7 +717,6 @@ pub async fn start_container(
         .build()
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // First, update the daemon with current allocations
     if !allocations.is_empty() {
         let allocations_json: Vec<serde_json::Value> = allocations.iter().map(|a| {
             serde_json::json!({
@@ -795,7 +745,6 @@ pub async fn start_container(
         }
     }
 
-    // Now start the container
     let start_url = format!("{}/containers/{}/start", daemon.base_url(), container.id);
     let start_res = client
         .post(&start_url)
@@ -809,7 +758,6 @@ pub async fn start_container(
         return Err(AppError::Daemon(format!("Failed to start container: {}", error_text)));
     }
 
-    // Update status
     sqlx::query("UPDATE containers SET status = 'running', updated_at = NOW() WHERE id = $1")
         .bind(id)
         .execute(&state.db)
@@ -830,7 +778,6 @@ pub async fn stop_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check if user has permission to manage this container
     let can_manage = container.user_id == claims.sub
         || claims.has_permission("containers.manage")
         || claims.has_permission("containers.manage_own") && container.user_id == claims.sub
@@ -848,10 +795,8 @@ pub async fn stop_container(
 
     let client = daemon_client();
 
-    // Use the container's configured stop command (defaults to "stop")
     let stop_command = container.stop_command.unwrap_or_else(|| "stop".to_string());
 
-    // First, attempt graceful stop by sending the stop command to stdin
     let graceful_url = format!("{}/containers/{}/graceful-stop", daemon.base_url(), container.id);
     let graceful_res = client
         .post(&graceful_url)
@@ -865,7 +810,7 @@ pub async fn stop_container(
 
     match graceful_res {
         Ok(res) if res.status().is_success() => {
-            // Update container status
+
             sqlx::query("UPDATE containers SET status = 'stopped', updated_at = NOW() WHERE id = $1")
                 .bind(id)
                 .execute(&state.db)
@@ -874,7 +819,7 @@ pub async fn stop_container(
             Ok(Json(serde_json::json!({ "success": true, "method": "graceful" })))
         }
         _ => {
-            // Graceful stop failed or timed out, fallback to Docker stop
+
             tracing::warn!("Graceful stop failed for container {}, using Docker stop", id);
 
             let docker_stop_url = format!("{}/containers/{}/stop", daemon.base_url(), container.id);
@@ -890,7 +835,6 @@ pub async fn stop_container(
                 return Err(AppError::Daemon(format!("Failed to stop container: {}", error_text)));
             }
 
-            // Update container status
             sqlx::query("UPDATE containers SET status = 'stopped', updated_at = NOW() WHERE id = $1")
                 .bind(id)
                 .execute(&state.db)
@@ -912,7 +856,6 @@ pub async fn restart_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check if user has permission to manage this container
     let can_manage = container.user_id == claims.sub
         || claims.has_permission("containers.manage")
         || claims.is_manager();
@@ -929,10 +872,8 @@ pub async fn restart_container(
 
     let client = daemon_client();
 
-    // Use the container's configured stop command
     let stop_command = container.stop_command.clone().unwrap_or_else(|| "stop".to_string());
 
-    // First, do graceful stop
     let stop_url = format!("{}/containers/{}/graceful-stop", daemon.base_url(), container.id);
     let stop_res = client
         .post(&stop_url)
@@ -947,7 +888,7 @@ pub async fn restart_container(
 
     if !stop_res.status().is_success() {
         tracing::warn!("Graceful stop failed, trying force stop");
-        // Fallback to force stop
+
         let force_stop_url = format!("{}/containers/{}/stop", daemon.base_url(), container.id);
         client
             .post(&force_stop_url)
@@ -957,10 +898,8 @@ pub async fn restart_container(
             .map_err(|e| AppError::Daemon(e.to_string()))?;
     }
 
-    // Wait a moment for container to fully stop
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    // Then start
     let start_url = format!("{}/containers/{}/start", daemon.base_url(), container.id);
     let start_res = client
         .post(&start_url)
@@ -974,7 +913,6 @@ pub async fn restart_container(
         return Err(AppError::Daemon(format!("Failed to start after stop: {}", error_text)));
     }
 
-    // Update status to running
     sqlx::query("UPDATE containers SET status = 'running', updated_at = NOW() WHERE id = $1")
         .bind(id)
         .execute(&state.db)
@@ -1009,7 +947,6 @@ pub async fn send_command(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check if user has permission to manage this container
     let can_manage = container.user_id == claims.sub
         || claims.has_permission("containers.manage")
         || claims.is_manager();
@@ -1066,7 +1003,6 @@ pub async fn graceful_stop_container(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check if user has permission to manage this container
     let can_manage = container.user_id == claims.sub
         || claims.has_permission("containers.manage")
         || claims.is_manager();
@@ -1099,7 +1035,6 @@ pub async fn graceful_stop_container(
         return Err(AppError::Daemon(format!("Failed to stop: {}", error_text)));
     }
 
-    // Update container status in database
     sqlx::query("UPDATE containers SET status = 'stopped', updated_at = NOW() WHERE id = $1")
         .bind(id)
         .execute(&state.db)
@@ -1114,7 +1049,6 @@ pub struct AssignAllocationRequest {
     pub allocation_id: Uuid,
 }
 
-/// Assign a primary allocation to a container (replaces any existing primary)
 pub async fn assign_allocation(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -1127,12 +1061,10 @@ pub async fn assign_allocation(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission
     if container.user_id != claims.sub && !claims.is_manager() {
         return Err(AppError::Unauthorized);
     }
 
-    // Check allocation exists and belongs to the same daemon
     let allocation: crate::models::Allocation = sqlx::query_as(
         "SELECT * FROM allocations WHERE id = $1 AND daemon_id = $2"
     )
@@ -1142,7 +1074,6 @@ pub async fn assign_allocation(
         .await?
         .ok_or(AppError::BadRequest("Allocation not found or belongs to different daemon".into()))?;
 
-    // Check if allocation is already assigned to another container
     let existing_other: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM container_allocations WHERE allocation_id = $1 AND container_id != $2"
     )
@@ -1155,7 +1086,6 @@ pub async fn assign_allocation(
         return Err(AppError::BadRequest("Allocation is already in use by another container".into()));
     }
 
-    // Check if this allocation is already assigned to this container
     let existing_for_container: Option<(Uuid, bool)> = sqlx::query_as(
         "SELECT id, COALESCE(is_primary, FALSE) FROM container_allocations WHERE allocation_id = $1 AND container_id = $2"
     )
@@ -1166,7 +1096,7 @@ pub async fn assign_allocation(
 
     if let Some((existing_id, is_already_primary)) = existing_for_container {
         if is_already_primary {
-            // Already primary, nothing to do
+
             return Ok(Json(serde_json::json!({
                 "message": "Allocation is already primary",
                 "allocationIp": allocation.ip,
@@ -1174,25 +1104,22 @@ pub async fn assign_allocation(
             })));
         }
 
-        // Unset current primary
         sqlx::query("UPDATE container_allocations SET is_primary = FALSE WHERE container_id = $1 AND is_primary = TRUE")
             .bind(container.id)
             .execute(&state.db)
             .await?;
 
-        // Set this one as primary
         sqlx::query("UPDATE container_allocations SET is_primary = TRUE WHERE id = $1")
             .bind(existing_id)
             .execute(&state.db)
             .await?;
     } else {
-        // Allocation not yet assigned to this container - remove existing primary and create new
+
         sqlx::query("UPDATE container_allocations SET is_primary = FALSE WHERE container_id = $1 AND is_primary = TRUE")
             .bind(container.id)
             .execute(&state.db)
             .await?;
 
-        // Create new primary allocation
         sqlx::query(
             r#"INSERT INTO container_allocations (id, container_id, allocation_id, ip, port, internal_port, protocol, is_primary, created_at)
                VALUES ($1, $2, $3, $4, $5, $5, 'tcp', TRUE, NOW())"#
@@ -1213,7 +1140,6 @@ pub async fn assign_allocation(
     })))
 }
 
-/// Get available allocations for a container's daemon (not assigned to any container)
 pub async fn get_available_allocations(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -1225,12 +1151,10 @@ pub async fn get_available_allocations(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission
     if container.user_id != claims.sub && !claims.is_manager() {
         return Err(AppError::Unauthorized);
     }
 
-    // Get available allocations (not assigned to any container via container_allocations) for this daemon
     let allocations: Vec<crate::models::Allocation> = sqlx::query_as(
         r#"SELECT a.* FROM allocations a
            WHERE a.daemon_id = $1
@@ -1244,7 +1168,6 @@ pub async fn get_available_allocations(
     Ok(Json(allocations))
 }
 
-/// Get all allocations assigned to a container
 pub async fn get_container_allocations(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -1256,12 +1179,10 @@ pub async fn get_container_allocations(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission
     if container.user_id != claims.sub && !claims.has_permission("containers.view_all") && !claims.is_manager() {
         return Err(AppError::Unauthorized);
     }
 
-    // Get all allocations assigned to this container (ip stored directly in container_allocations)
     let allocations: Vec<AllocationInfo> = sqlx::query_as(
         r#"SELECT ca.id, ca.allocation_id, ca.ip, ca.port, ca.internal_port, ca.protocol, COALESCE(ca.is_primary, FALSE) as is_primary
            FROM container_allocations ca
@@ -1275,7 +1196,6 @@ pub async fn get_container_allocations(
     Ok(Json(allocations))
 }
 
-/// Add an additional allocation to a container
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddAllocationRequest {
@@ -1283,7 +1203,6 @@ pub struct AddAllocationRequest {
     #[serde(default)]
     pub is_primary: bool,
 }
-
 
 pub async fn add_allocation(
     State(state): State<AppState>,
@@ -1297,12 +1216,10 @@ pub async fn add_allocation(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission
     if container.user_id != claims.sub && !claims.is_manager() {
         return Err(AppError::Unauthorized);
     }
 
-    // Check allocation exists and belongs to the same daemon
     let allocation: crate::models::Allocation = sqlx::query_as(
         "SELECT * FROM allocations WHERE id = $1 AND daemon_id = $2"
     )
@@ -1312,7 +1229,6 @@ pub async fn add_allocation(
         .await?
         .ok_or(AppError::BadRequest("Allocation not found or belongs to different daemon".into()))?;
 
-    // Check if allocation is already assigned to any container
     let existing: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM container_allocations WHERE allocation_id = $1"
     )
@@ -1324,7 +1240,6 @@ pub async fn add_allocation(
         return Err(AppError::BadRequest("Allocation is already in use".into()));
     }
 
-    // If setting as primary, remove existing primary
     if req.is_primary {
         sqlx::query("UPDATE container_allocations SET is_primary = FALSE WHERE container_id = $1 AND is_primary = TRUE")
             .bind(container.id)
@@ -1332,7 +1247,6 @@ pub async fn add_allocation(
             .await?;
     }
 
-    // Check if this will be the first allocation (auto-set as primary)
     let has_allocations: Option<(i64,)> = sqlx::query_as(
         "SELECT COUNT(*) FROM container_allocations WHERE container_id = $1"
     )
@@ -1343,7 +1257,6 @@ pub async fn add_allocation(
 
     let is_primary = req.is_primary || has_allocations.map(|c| c.0 == 0).unwrap_or(true);
 
-    // Create container_allocation entry - use protocol from the allocation
     sqlx::query(
         r#"INSERT INTO container_allocations (id, container_id, allocation_id, ip, port, internal_port, protocol, is_primary, created_at)
            VALUES ($1, $2, $3, $4, $5, $5, $6, $7, NOW())"#
@@ -1366,7 +1279,6 @@ pub async fn add_allocation(
     })))
 }
 
-/// Remove an allocation from a container
 pub async fn remove_allocation(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -1378,12 +1290,10 @@ pub async fn remove_allocation(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Check permission
     if container.user_id != claims.sub && !claims.is_manager() {
         return Err(AppError::Unauthorized);
     }
 
-    // Check container_allocation exists for this container
     let container_allocation: (Uuid, bool) = sqlx::query_as(
         "SELECT id, COALESCE(is_primary, FALSE) FROM container_allocations WHERE allocation_id = $1 AND container_id = $2"
     )
@@ -1395,13 +1305,11 @@ pub async fn remove_allocation(
 
     let was_primary = container_allocation.1;
 
-    // Remove container_allocation
     sqlx::query("DELETE FROM container_allocations WHERE id = $1")
         .bind(container_allocation.0)
         .execute(&state.db)
         .await?;
 
-    // If this was the primary allocation, promote another allocation to primary
     if was_primary {
         sqlx::query(
             r#"UPDATE container_allocations
@@ -1449,7 +1357,6 @@ pub async fn set_sftp_password(
         return Err(AppError::BadRequest("Password must be at least 8 characters".into()));
     }
 
-    // Register FTP user with daemon
     let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
         .bind(container.daemon_id)
         .fetch_optional(&state.db)
@@ -1473,7 +1380,6 @@ pub async fn set_sftp_password(
     let password_hash = bcrypt::hash(&req.password, state.config.bcrypt_cost)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // SFTP username is first 8 chars of container ID
     let sftp_user = container.id.to_string().replace("-", "")[..8].to_string();
 
     sqlx::query("UPDATE containers SET sftp_user = $1, sftp_pass = $2, updated_at = NOW() WHERE id = $3")
@@ -1632,7 +1538,7 @@ pub async fn list_files(
 
     let client = daemon_client();
     let path = query.path.unwrap_or_else(|| "/".to_string());
-    // Use container ID (UUID) for volume path
+
     let url = format!("{}/containers/{}/files?path={}", daemon.base_url(), container.id, path);
 
     let resp = client
@@ -1682,7 +1588,7 @@ pub async fn read_file(
         .ok_or(AppError::NotFound)?;
 
     let client = daemon_client();
-    // Use container ID (UUID) for volume path
+
     let url = format!("{}/containers/{}/files/read?path={}", daemon.base_url(), container.id, query.path);
 
     let resp = client
@@ -1728,7 +1634,7 @@ pub async fn write_file(
         .ok_or(AppError::NotFound)?;
 
     let client = daemon_client();
-    // Use container ID (UUID) for volume path
+
     let url = format!("{}/containers/{}/files/write", daemon.base_url(), container.id);
 
     let resp = client
@@ -1789,13 +1695,11 @@ pub async fn upload_file(
     let path = path.ok_or_else(|| AppError::BadRequest("Missing 'path' field".to_string()))?;
     let content = file_content.ok_or_else(|| AppError::BadRequest("Missing 'file' field".to_string()))?;
 
-    // Convert to base64 for transmission to daemon
     let content_base64 = general_purpose::STANDARD.encode(&content);
 
     let client = daemon_client();
     let url = format!("{}/containers/{}/files/write", daemon.base_url(), container.id);
 
-    // Send as base64 encoded content
     let resp = client
         .post(&url)
         .header("X-API-Key", &daemon.api_key)
@@ -1817,8 +1721,6 @@ pub async fn upload_file(
     Ok(Json(serde_json::json!({ "message": "File uploaded successfully" })))
 }
 
-/// Upload file chunk - forwards each chunk directly to daemon
-/// This allows streaming uploads without buffering the entire file in the API
 pub async fn upload_file_chunk(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -1837,7 +1739,6 @@ pub async fn upload_file_chunk(
         return Err(AppError::Unauthorized);
     }
 
-    // Parse multipart form
     let mut upload_id: Option<String> = None;
     let mut chunk_index: Option<u32> = None;
     let mut total_chunks: Option<u32> = None;
@@ -1868,7 +1769,7 @@ pub async fn upload_file_chunk(
                 tracing::error!("upload_file_chunk: Error reading path: {}", e);
                 AppError::BadRequest(format!("Read error: {}", e))
             })?),
-            "fileName" | "fileSize" => { /* Ignored - daemon handles these */ }
+            "fileName" | "fileSize" => {  }
             "chunk" => {
                 tracing::info!("upload_file_chunk: Reading chunk data...");
                 chunk_data = Some(field.bytes().await.map_err(|e| {
@@ -1894,7 +1795,6 @@ pub async fn upload_file_chunk(
 
     tracing::info!("upload_file_chunk: Getting daemon info for container {}", container.id);
 
-    // Get daemon info
     let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
         .bind(container.daemon_id)
         .fetch_optional(&state.db)
@@ -1903,7 +1803,6 @@ pub async fn upload_file_chunk(
 
     tracing::info!("upload_file_chunk: Found daemon {}, encoding {} bytes to base64", daemon.id, chunk_data.len());
 
-    // Forward chunk directly to daemon - no buffering in API!
     let content_base64 = general_purpose::STANDARD.encode(&chunk_data);
 
     tracing::info!("upload_file_chunk: Base64 encoded size: {} bytes", content_base64.len());
@@ -1916,7 +1815,7 @@ pub async fn upload_file_chunk(
     let resp = client
         .post(&url)
         .header("X-API-Key", &daemon.api_key)
-        .timeout(std::time::Duration::from_secs(120)) // Longer timeout for large chunks
+        .timeout(std::time::Duration::from_secs(120))
         .json(&serde_json::json!({
             "uploadId": upload_id,
             "chunkIndex": chunk_index,
@@ -1940,7 +1839,6 @@ pub async fn upload_file_chunk(
         return Err(AppError::BadRequest(format!("Daemon returned {}: {}", status, error_text)));
     }
 
-    // Return daemon's response (includes completion status)
     let daemon_response: serde_json::Value = resp.json().await
         .map_err(|e| {
             tracing::error!("upload_file_chunk: Failed to parse daemon response: {}", e);
@@ -1981,7 +1879,7 @@ pub async fn create_folder(
         .ok_or(AppError::NotFound)?;
 
     let client = daemon_client();
-    // Use container ID (UUID) for volume path
+
     let url = format!("{}/containers/{}/files/folder", daemon.base_url(), container.id);
 
     let resp = client
@@ -2032,7 +1930,7 @@ pub async fn delete_file(
         .ok_or(AppError::NotFound)?;
 
     let client = daemon_client();
-    // Use container ID (UUID) for volume path
+
     let url = format!("{}/containers/{}/files/delete?path={}", daemon.base_url(), container.id, query.path);
 
     let resp = client

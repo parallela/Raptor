@@ -13,7 +13,6 @@ use tokio::sync::broadcast;
 
 use crate::models::{ContainerInfo, ContainerResources, ContainerStats};
 
-/// Default network name for all Raptor containers
 pub const RAPTOR_NETWORK: &str = "raptord_internal";
 
 pub struct DockerManager {
@@ -36,22 +35,19 @@ impl DockerManager {
 
         let manager = Self { docker };
 
-        // Ensure the internal network exists
         manager.ensure_network().await?;
 
         Ok(manager)
     }
 
-    /// Ensure the raptord_internal network exists
     async fn ensure_network(&self) -> anyhow::Result<()> {
-        // Check if network already exists
+
         match self.docker.inspect_network::<String>(RAPTOR_NETWORK, None).await {
             Ok(_) => {
                 tracing::info!("Network {} already exists", RAPTOR_NETWORK);
                 return Ok(());
             }
             Err(_) => {
-                // Network doesn't exist, create it
                 tracing::info!("Creating network {}", RAPTOR_NETWORK);
             }
         }
@@ -66,7 +62,6 @@ impl DockerManager {
         tracing::info!("Created network {}", RAPTOR_NETWORK);
         Ok(())
     }
-
 
     pub async fn create_container_with_resources(
         &self,
@@ -94,27 +89,20 @@ impl DockerManager {
             }
         }
 
-        // Set environment variables for the container
-        // HOME and USER are set so applications can find their config files
-        // when running as a custom UID that doesn't exist in /etc/passwd
         let mut env_vars: Vec<String> = vec![
             "HOME=/home/container".to_string(),
             "USER=container".to_string(),
         ];
 
-        // Build entrypoint and cmd based on whether we have a startup script
-        // We bypass the image's entrypoint and run our command directly with bash -c
-        // This ensures our environment (HOME, etc.) is properly set before any commands run
         let (entrypoint, cmd) = if let Some(s) = startup_script {
-            // Also add STARTUP env var for compatibility with scripts that might read it
+
             env_vars.push(format!("STARTUP={}", s));
-            // Use bash -c to run the startup script directly, bypassing image entrypoint
+
             (
                 Some(vec!["/bin/bash".to_string()]),
                 Some(vec!["-c".to_string(), s.to_string()])
             )
         } else {
-            // No startup script - let the image's default entrypoint/cmd run
             (None, None)
         };
 
@@ -123,11 +111,6 @@ impl DockerManager {
         let cpu_period = 100000i64;
         let cpu_quota = (resources.cpu_limit * cpu_period as f64) as i64;
 
-        // Parse restart policy from string
-        // - "no": Never restart
-        // - "always": Always restart
-        // - "on-failure": Restart only on non-zero exit code (good for Node.js, etc.)
-        // - "unless-stopped": Restart unless explicitly stopped via Docker API (good for game servers)
         let restart_policy = match restart_policy_name.to_lowercase().as_str() {
             "no" | "none" => bollard::service::RestartPolicy {
                 name: Some(bollard::service::RestartPolicyNameEnum::NO),
@@ -142,25 +125,22 @@ impl DockerManager {
                 maximum_retry_count: Some(5),
             },
             _ => bollard::service::RestartPolicy {
-                // Default to unless-stopped for backward compatibility with game servers
+
                 name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
                 maximum_retry_count: None,
             },
         };
         tracing::debug!("Using restart policy: {} for container {}", restart_policy_name, name);
 
-        // Volume binding: mount {FTP_BASE_PATH}/volumes/{container_name} to /home/container
         let base_path = std::env::var("FTP_BASE_PATH")
             .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
                 .unwrap_or_else(|_| "/data/raptor".into()));
         let volume_path = format!("{}/volumes/{}", base_path, name);
 
-        // Create the volume directory if it doesn't exist (using tokio::fs to avoid blocking)
         if let Err(e) = tokio::fs::create_dir_all(&volume_path).await {
             tracing::warn!("Failed to create volume directory {}: {}", volume_path, e);
         }
 
-        // Set permissions for container user to write to the volume
         #[cfg(unix)]
         {
             let chmod_result = tokio::process::Command::new("chmod")
@@ -184,11 +164,9 @@ impl DockerManager {
             }
         }
 
-        // Create a persistent machine-id file in the volume if it doesn't exist
-        // This is needed for applications like Hytale that use machine-id for OAuth device identification
         let machine_id_path = format!("{}/.machine-id", volume_path);
         if !std::path::Path::new(&machine_id_path).exists() {
-            // Generate a random machine ID (32 hex characters)
+
             use rand::Rng;
             let machine_id: String = (0..32)
                 .map(|_| format!("{:x}", rand::thread_rng().gen::<u8>() % 16))
@@ -205,18 +183,16 @@ impl DockerManager {
             format!("{}:/etc/machine-id:ro", machine_id_path),
         ];
 
-        // Get the current user's UID and GID to pass to the container
-        // This ensures files created in the container are owned by the daemon user
         #[cfg(unix)]
         let user_spec = {
             use std::os::unix::fs::MetadataExt;
-            // Try to get UID/GID from the volume directory
+
             if let Ok(metadata) = std::fs::metadata(&volume_path) {
                 let uid = metadata.uid();
                 let gid = metadata.gid();
                 Some(format!("{}:{}", uid, gid))
             } else {
-                // Fallback: get current process UID/GID
+
                 let uid = unsafe { libc::getuid() };
                 let gid = unsafe { libc::getgid() };
                 Some(format!("{}:{}", uid, gid))
@@ -238,7 +214,6 @@ impl DockerManager {
             ..Default::default()
         };
 
-        // Build exposed_ports from port_bindings keys - store as Vec to own the strings
         let exposed_port_keys: Vec<String> = port_bindings
             .as_ref()
             .map(|pb| pb.keys().cloned().collect())
@@ -246,29 +221,26 @@ impl DockerManager {
 
         let config = Config {
             image: Some(image),
-            // Override entrypoint to run our startup command directly with bash -c
-            // This bypasses the image's entrypoint which may run commands before our env is set
+
             entrypoint: entrypoint.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
             cmd: cmd.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect()),
             env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
-            // Run container as the daemon user's UID:GID so files are accessible via FTP
-            // This ensures all files created by the container are owned by the raptor user
+
             user: user_spec.as_deref(),
             exposed_ports: if exposed_port_keys.is_empty() {
                 None
             } else {
                 Some(exposed_port_keys.iter().map(|k| (k.as_str(), HashMap::new())).collect())
             },
-            // TTY mode - when true, allocates a pseudo-terminal (needed for interactive programs)
-            // When false, logs are cleaner without escape sequences
+
             tty: Some(tty),
-            open_stdin: Some(true),       // Keeps stdin open for commands
-            attach_stdin: Some(true),     // Allows docker attach to send input
-            attach_stdout: Some(true),    // Receive server output
-            attach_stderr: Some(true),    // Receive errors
-            stdin_once: Some(false),      // Prevents stdin closing after first attach
+            open_stdin: Some(true),
+            attach_stdin: Some(true),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            stdin_once: Some(false),
             ..Default::default()
         };
 
@@ -312,7 +284,6 @@ impl DockerManager {
         Ok(())
     }
 
-    /// Update container resource limits (memory, cpu, etc.)
     pub async fn update_container_resources(&self, id: &str, resources: &ContainerResources) -> anyhow::Result<()> {
         use bollard::container::UpdateContainerOptions;
 
@@ -335,8 +306,6 @@ impl DockerManager {
         Ok(())
     }
 
-    /// Send a command to the container's stdin using docker attach
-    /// Requires container to be created with: tty=true, open_stdin=true, stdin_once=false
     pub async fn send_command(&self, id: &str, command: &str) -> anyhow::Result<()> {
         tracing::info!("Sending command to container {}: {}", id, command);
 
@@ -353,35 +322,28 @@ impl DockerManager {
             .attach_container(id, Some(options))
             .await?;
 
-        // Send command with newline
         let cmd_with_newline = format!("{}\n", command);
         input.write_all(cmd_with_newline.as_bytes()).await?;
         input.flush().await?;
 
-        // Close the input to detach cleanly
         drop(input);
 
         tracing::info!("Command sent to container {}", id);
         Ok(())
     }
 
-    /// Run an install script inside a container using docker exec
-    /// This is used to set up the server files when creating from a flake
     pub async fn run_install_script(&self, id: &str, script: &str, env: &std::collections::HashMap<String, String>) -> anyhow::Result<()> {
         use bollard::exec::{CreateExecOptions, StartExecResults};
         use futures_util::StreamExt;
 
         tracing::info!("Running install script in container {}", id);
 
-        // Build environment variables array
         let mut env_vars: Vec<String> = env.iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
 
-        // Add PATH to ensure common tools are available
         env_vars.push("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string());
 
-        // First, ensure the working directory exists and install required tools
         let setup_script = r#"
             mkdir -p /home/container
             cd /home/container
@@ -395,7 +357,6 @@ impl DockerManager {
             fi
         "#;
 
-        // Run setup first
         let setup_exec = self.docker.create_exec(
             id,
             CreateExecOptions {
@@ -421,7 +382,6 @@ impl DockerManager {
             }
         }
 
-        // Now run the actual install script
         let exec = self.docker.create_exec(
             id,
             CreateExecOptions {
@@ -435,7 +395,6 @@ impl DockerManager {
             }
         ).await?;
 
-        // Start the exec and stream output
         let start_result = self.docker.start_exec(&exec.id, None).await?;
 
         if let StartExecResults::Attached { mut output, .. } = start_result {
@@ -454,7 +413,6 @@ impl DockerManager {
             }
         }
 
-        // Check exec exit code
         let exec_inspect = self.docker.inspect_exec(&exec.id).await?;
         if let Some(exit_code) = exec_inspect.exit_code {
             if exit_code != 0 {
@@ -467,9 +425,6 @@ impl DockerManager {
         Ok(())
     }
 
-    /// Run install script in a temporary container that shares the same volume as the target container
-    /// This avoids issues with the main container's restart policy
-    /// If log_tx is provided, install logs will be sent through it (for WebSocket streaming)
     pub async fn run_install_in_temp_container(
         &self,
         container_name: &str,
@@ -480,7 +435,6 @@ impl DockerManager {
         self.run_install_in_temp_container_with_logs(container_name, image, script, env, None).await
     }
 
-    /// Run install script with optional log streaming
     pub async fn run_install_in_temp_container_with_logs(
         &self,
         container_name: &str,
@@ -492,37 +446,31 @@ impl DockerManager {
         use bollard::container::{CreateContainerOptions, Config, LogsOptions, RemoveContainerOptions, WaitContainerOptions};
         use futures_util::StreamExt;
 
-
         let install_container_name = format!("{}-install", container_name);
         tracing::info!("=== Starting installation for container {} ===", container_name);
         tracing::info!("Install container name: {}", install_container_name);
         tracing::info!("Using image: {}", image);
 
-        // Build environment variables
         let env_vars: Vec<String> = env.iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .chain(std::iter::once("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()))
             .collect();
 
-        // Log environment variables
         tracing::info!("Environment variables:");
         for (k, v) in env.iter() {
             tracing::info!("  {}={}", k, v);
         }
 
-        // Get volume path (same as main container)
         let base_path = std::env::var("FTP_BASE_PATH")
             .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
                 .unwrap_or_else(|_| "/data/raptor".into()));
         let volume_path = format!("{}/volumes/{}", base_path, container_name);
         tracing::info!("Volume path: {}", volume_path);
 
-        // Create volume directory if it doesn't exist
         if let Err(e) = tokio::fs::create_dir_all(&volume_path).await {
             tracing::warn!("Failed to create volume directory {}: {}", volume_path, e);
         }
 
-        // Set permissions for container user to write to the volume
         #[cfg(unix)]
         {
             let chmod_result = tokio::process::Command::new("chmod")
@@ -548,18 +496,16 @@ impl DockerManager {
 
         let binds = vec![format!("{}:/home/container:rw", volume_path)];
 
-        // Get the current user's UID and GID to pass to the container
-        // This ensures files created during installation are owned by the daemon user
         #[cfg(unix)]
         let user_spec = {
             use std::os::unix::fs::MetadataExt;
-            // Try to get UID/GID from the volume directory
+
             if let Ok(metadata) = std::fs::metadata(&volume_path) {
                 let uid = metadata.uid();
                 let gid = metadata.gid();
                 Some(format!("{}:{}", uid, gid))
             } else {
-                // Fallback: get current process UID/GID
+
                 let uid = unsafe { libc::getuid() };
                 let gid = unsafe { libc::getgid() };
                 Some(format!("{}:{}", uid, gid))
@@ -570,7 +516,6 @@ impl DockerManager {
         #[cfg(unix)]
         let install_user_spec = user_spec;
 
-        // Log the install script (first 500 chars for brevity)
         let script_preview = if script.len() > 500 {
             format!("{}...(truncated)", &script[..500])
         } else {
@@ -578,7 +523,6 @@ impl DockerManager {
         };
         tracing::info!("Install script:\n{}", script_preview);
 
-        // Wrap script to ensure curl and jq are available
         let full_script = format!(r#"
             echo "[Raptor Install] Starting installation..."
             echo "[Raptor Install] Working directory: $(pwd)"
@@ -602,19 +546,17 @@ impl DockerManager {
 
         let host_config = bollard::service::HostConfig {
             binds: Some(binds),
-            auto_remove: Some(true), // Automatically remove container when it exits
+            auto_remove: Some(true),
             network_mode: Some(RAPTOR_NETWORK.to_string()),
             ..Default::default()
         };
 
         let config = Config {
             image: Some(image),
-            // Override entrypoint to run bash directly (not through the image's entrypoint.sh)
             entrypoint: Some(vec!["bash", "-c"]),
             cmd: Some(vec![&full_script]),
             host_config: Some(host_config),
             working_dir: Some("/home/container"),
-            // Run as the daemon user's UID:GID so files are accessible via FTP
             user: install_user_spec.as_deref(),
             env: Some(env_vars.iter().map(|s| s.as_str()).collect()),
             tty: Some(false),
@@ -623,13 +565,11 @@ impl DockerManager {
             ..Default::default()
         };
 
-        // Remove any existing install container with the same name
         let _ = self.docker.remove_container(
             &install_container_name,
             Some(RemoveContainerOptions { force: true, ..Default::default() })
         ).await;
 
-        // Create the temporary install container
         let create_result = self.docker.create_container(
             Some(CreateContainerOptions { name: install_container_name.as_str(), platform: None }),
             config
@@ -637,12 +577,9 @@ impl DockerManager {
 
         tracing::info!("Created install container: {}", create_result.id);
 
-        // Start the container
         self.docker.start_container::<String>(&create_result.id, None).await?;
         tracing::info!("Install container started: {}", create_result.id);
 
-
-        // Check if container is still running
         match self.docker.inspect_container(&create_result.id, None).await {
             Ok(info) => {
                 let state = info.state.as_ref();
@@ -651,7 +588,6 @@ impl DockerManager {
                 let exit_code = state.and_then(|s| s.exit_code).unwrap_or(-1);
                 tracing::info!("Install container status: {}, running: {}, exit_code: {}", status, running, exit_code);
 
-                // If already exited, get the logs anyway
                 if !running && exit_code != 0 {
                     tracing::error!("Install container exited immediately with code {}", exit_code);
                 }
@@ -663,24 +599,21 @@ impl DockerManager {
 
         tracing::info!("Starting log stream for install container...");
 
-        // Stream logs while waiting
         let log_options = LogsOptions::<String> {
             follow: true,
             stdout: true,
             stderr: true,
-            since: 0, // Get all logs from the beginning
+            since: 0,
             timestamps: false,
             ..Default::default()
         };
 
         let mut logs = self.docker.logs(&create_result.id, Some(log_options));
 
-        // Also wait for container to finish
         let wait_options = WaitContainerOptions { condition: "not-running" };
         let mut wait_stream = self.docker.wait_container(&create_result.id, Some(wait_options));
 
-        // Process logs until container exits (with timeout)
-        let timeout = tokio::time::Duration::from_secs(300); // 5 minute timeout for install
+        let timeout = tokio::time::Duration::from_secs(300);
         let start_time = std::time::Instant::now();
 
         loop {
@@ -689,7 +622,7 @@ impl DockerManager {
                 if let Some(ref tx) = log_tx {
                     let _ = tx.send("\x1b[31m[Install] Installation timed out after 5 minutes\x1b[0m".to_string());
                 }
-                // Kill the container
+
                 let _ = self.docker.kill_container::<String>(&create_result.id, None).await;
                 break;
             }
@@ -702,7 +635,7 @@ impl DockerManager {
                             for line in text.lines() {
                                 if !line.trim().is_empty() {
                                     tracing::info!("[install] {}", line.trim());
-                                    // Send to WebSocket if connected
+
                                     if let Some(ref tx) = log_tx {
                                         let _ = tx.send(format!("\x1b[36m[Install]\x1b[0m {}", line.trim()));
                                     }
@@ -745,20 +678,14 @@ impl DockerManager {
             }
         }
 
-        // Container should auto-remove, but clean up just in case
         let _ = self.docker.remove_container(
             &install_container_name,
             Some(RemoveContainerOptions { force: true, ..Default::default() })
         ).await;
 
         Ok(())
-    }    /// Gracefully stop container by sending a stop command first, then using docker stop
-    /// This allows the log stream to capture shutdown logs, then properly stops the container
-    /// so that the "unless-stopped" restart policy doesn't restart it
+    }
     pub async fn graceful_stop(&self, id: &str, timeout_secs: u64) -> anyhow::Result<()> {
-        // Use Docker's stop command which sends SIGTERM then SIGKILL after timeout
-        // This properly stops the container so "unless-stopped" won't restart it
-        // The container's entrypoint will receive SIGTERM and can shut down gracefully
         tracing::info!("Stopping container {} with {}s timeout", id, timeout_secs);
 
         let timeout: i64 = timeout_secs.try_into().unwrap_or(30);
@@ -784,9 +711,6 @@ impl DockerManager {
         Ok(())
     }
 
-    /// Remove all containers matching a name (both running and stopped)
-    /// This is useful to clean up old containers before recreating
-    /// NOTE: Containers should already be stopped gracefully before calling this
     pub async fn cleanup_containers_by_name(&self, name: &str) -> anyhow::Result<u32> {
         let options = ListContainersOptions {
             all: true,
@@ -801,7 +725,7 @@ impl DockerManager {
 
         for container in containers {
             if let Some(id) = container.id {
-                // Check if the name matches exactly (Docker filter is a prefix match)
+
                 let container_name = container.names
                     .unwrap_or_default()
                     .first()
@@ -812,7 +736,7 @@ impl DockerManager {
 
                 if container_name == name {
                     tracing::info!("Cleaning up old container: {} ({})", container_name, id);
-                    // Force remove (container should already be stopped)
+
                     if let Err(e) = self.docker.remove_container(&id, Some(RemoveContainerOptions { force: true, ..Default::default() })).await {
                         tracing::warn!("Failed to remove container {}: {}", id, e);
                     } else {
@@ -881,7 +805,6 @@ impl DockerManager {
         })
     }
 
-
     pub fn stream_logs(&self, id: &str, tx: broadcast::Sender<String>) {
         let docker = self.docker.clone();
         let id = id.to_string();
@@ -889,7 +812,6 @@ impl DockerManager {
         tokio::spawn(async move {
             tracing::info!("Starting log stream for container: {}", id);
 
-            // Get historical logs first (last 500 lines)
             let historical_options = LogsOptions::<String> {
                 follow: false,
                 stdout: true,
@@ -912,7 +834,7 @@ impl DockerManager {
                             LogOutput::StdErr { message } => {
                                 format!("\x1b[31m{}\x1b[0m", String::from_utf8_lossy(&message).trim_end())
                             }
-                            // TTY mode combines stdout/stderr into Console
+
                             LogOutput::Console { message } => {
                                 String::from_utf8_lossy(&message).trim_end().to_string()
                             }
@@ -937,7 +859,6 @@ impl DockerManager {
 
             tracing::debug!("Loaded {} historical log lines for container {}", log_count, id);
 
-            // Now follow new logs (stream in real-time)
             let follow_options = LogsOptions::<String> {
                 follow: true,
                 stdout: true,
@@ -959,7 +880,7 @@ impl DockerManager {
                             LogOutput::StdErr { message } => {
                                 format!("\x1b[31m{}\x1b[0m", String::from_utf8_lossy(&message).trim_end())
                             }
-                            // TTY mode combines stdout/stderr into Console
+
                             LogOutput::Console { message } => {
                                 String::from_utf8_lossy(&message).trim_end().to_string()
                             }
@@ -984,7 +905,6 @@ impl DockerManager {
         });
     }
 
-
     pub async fn get_container_stats(&self, id: &str) -> anyhow::Result<ContainerStats> {
         let options = StatsOptions {
             stream: false,
@@ -996,7 +916,6 @@ impl DockerManager {
         if let Some(result) = stream.next().await {
             let stats = result?;
 
-            // Calculate CPU percentage
             let cpu_delta = stats.cpu_stats.cpu_usage.total_usage
                 .saturating_sub(stats.precpu_stats.cpu_usage.total_usage);
             let system_delta = stats.cpu_stats.system_cpu_usage
@@ -1010,15 +929,10 @@ impl DockerManager {
                 0.0
             };
 
-            // Memory usage
-            // Note: This is the raw cgroup memory usage which includes cache.
-            // Docker's `docker stats` subtracts inactive_file, but bollard 0.16 doesn't expose that field.
-            // For accurate memory reporting matching `docker stats`, consider upgrading to bollard 0.18+
             let memory_usage = stats.memory_stats.usage.unwrap_or(0);
             let memory_limit = stats.memory_stats.limit.unwrap_or(1);
             let memory_percent = (memory_usage as f64 / memory_limit as f64) * 100.0;
 
-            // Network stats
             let (network_rx, network_tx) = stats.networks.as_ref()
                 .map(|networks| {
                     networks.values().fold((0u64, 0u64), |(rx, tx), net| {
@@ -1027,7 +941,6 @@ impl DockerManager {
                 })
                 .unwrap_or((0, 0));
 
-            // Block I/O stats
             let (block_read, block_write) = stats.blkio_stats.io_service_bytes_recursive
                 .as_ref()
                 .map(|entries| {
@@ -1073,7 +986,7 @@ impl DockerManager {
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(stats) => {
-                        // Calculate CPU percentage
+
                         let cpu_delta = stats.cpu_stats.cpu_usage.total_usage
                             .saturating_sub(stats.precpu_stats.cpu_usage.total_usage);
                         let system_delta = stats.cpu_stats.system_cpu_usage
@@ -1087,12 +1000,10 @@ impl DockerManager {
                             0.0
                         };
 
-                        // Memory usage
                         let memory_usage = stats.memory_stats.usage.unwrap_or(0);
                         let memory_limit = stats.memory_stats.limit.unwrap_or(1);
                         let memory_percent = (memory_usage as f64 / memory_limit as f64) * 100.0;
 
-                        // Network stats
                         let (network_rx, network_tx) = stats.networks.as_ref()
                             .map(|networks| {
                                 networks.values().fold((0u64, 0u64), |(rx, tx), net| {
@@ -1101,7 +1012,6 @@ impl DockerManager {
                             })
                             .unwrap_or((0, 0));
 
-                        // Block I/O stats
                         let (block_read, block_write) = stats.blkio_stats.io_service_bytes_recursive
                             .as_ref()
                             .map(|entries| {

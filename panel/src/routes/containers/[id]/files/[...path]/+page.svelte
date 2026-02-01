@@ -17,7 +17,6 @@
     let editorReady = false;
     let mounted = false;
 
-    // Monaco editor
     let editorContainer: HTMLDivElement;
     let editor: any;
     let monaco: any;
@@ -28,10 +27,8 @@
     $: container = $containerStore;
     $: hasChanges = fileContent !== originalContent;
 
-    // Get syntax highlighting language
     $: language = getLanguage(fileName);
 
-    // Update Monaco language when language changes
     $: if (editor && monaco && language) {
         const model = editor?.getModel();
         if (model) {
@@ -42,7 +39,6 @@
     onMount(async () => {
         mounted = true;
         await loadFile();
-        // Initialize Monaco after file is loaded and DOM is ready
         await tick();
         if (editorContainer && !editorReady) {
             await initMonaco();
@@ -62,11 +58,10 @@
         if (editorReady || !editorContainer || !mounted) return;
 
         try {
-            await tick(); // Ensure DOM is ready
+            await tick();
 
             monaco = await import('monaco-editor');
 
-            // Define custom dark theme
             monaco.editor.defineTheme('raptor-dark', {
                 base: 'vs-dark',
                 inherit: true,
@@ -114,12 +109,10 @@
                 },
             });
 
-            // Listen for content changes
             editor.onDidChangeModelContent(() => {
                 fileContent = editor.getValue();
             });
 
-            // Add save command
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                 if (hasChanges) saveFile();
             });
@@ -232,7 +225,6 @@
         return langMap[ext || ''] || 'plaintext';
     }
 
-    // File icon helper
     function getFileIcon(name: string): string {
         const ext = name.split('.').pop()?.toLowerCase();
         if (ext === 'jar' || ext === 'java' || ext === 'class') return 'java';
@@ -243,7 +235,6 @@
         return 'file';
     }
 
-    // Breadcrumb helpers
     $: breadcrumbs = filePath.split('/').filter(Boolean).map((part, i, arr) => ({
         name: part,
         path: arr.slice(0, i + 1).join('/'),

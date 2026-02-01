@@ -25,36 +25,23 @@ use crate::database_manager::{
     DatabaseServer, DeleteUserDatabaseRequest, ResetPasswordRequest,
 };
 
-// ============================================================================
-// STATE PERSISTENCE - All async, no blocking I/O
-// ============================================================================
-
-/// Get the path to the container state file
 fn get_state_file_path() -> PathBuf {
     let data_dir = std::env::var("DAEMON_DATA_DIR")
         .unwrap_or_else(|_| "/var/lib/raptor-daemon".to_string());
     PathBuf::from(data_dir).join("containers.json")
 }
 
-/// Snapshot current container state from DashMap.
-/// IMPORTANT: This clones all data and releases all locks before returning.
 fn snapshot_containers(state: &AppState) -> Vec<ManagedContainer> {
     state.containers.iter().map(|r| r.value().clone()).collect()
 }
 
-/// Save container state to disk asynchronously.
-/// This function:
-/// 1. Snapshots state without holding locks across await points
-/// 2. Uses tokio::fs for all I/O operations
-/// 3. Is safe to call from any async context
 pub async fn save_container_state(state: &AppState) {
-    // Snapshot state first - DashMap guards are dropped immediately
+
     let containers = snapshot_containers(state);
     let state_file = get_state_file_path();
 
     tracing::debug!("Saving {} containers to {:?}", containers.len(), state_file);
 
-    // Ensure parent directory exists using async I/O
     if let Some(parent) = state_file.parent() {
         if let Err(e) = tokio::fs::create_dir_all(parent).await {
             tracing::error!("Failed to create state directory: {}", e);
@@ -62,7 +49,6 @@ pub async fn save_container_state(state: &AppState) {
         }
     }
 
-    // Serialize and write using async I/O
     match serde_json::to_string_pretty(&containers) {
         Ok(json) => {
             if let Err(e) = tokio::fs::write(&state_file, json).await {
@@ -77,10 +63,8 @@ pub async fn save_container_state(state: &AppState) {
     }
 }
 
-/// Save container state in background (fire-and-forget).
-/// Useful when you don't need to wait for the save to complete.
 pub fn save_container_state_background(state: &AppState) {
-    // Snapshot state before spawning - guards dropped immediately
+
     let containers = snapshot_containers(state);
     let state_file = get_state_file_path();
 
@@ -107,7 +91,6 @@ pub fn save_container_state_background(state: &AppState) {
     });
 }
 
-/// Load container state from disk
 pub async fn load_container_state() -> Vec<ManagedContainer> {
     let state_file = get_state_file_path();
 
@@ -133,17 +116,10 @@ pub async fn load_container_state() -> Vec<ManagedContainer> {
     }
 }
 
-// ============================================================================
-// SAFE STATE ACCESS HELPERS
-// These ensure DashMap guards are never held across await points
-// ============================================================================
-
-/// Get a clone of a container from state. Guard is dropped immediately.
 fn get_container_clone(state: &AppState, id: &str) -> Option<ManagedContainer> {
     state.containers.get(id).map(|r| r.value().clone())
 }
 
-/// Get Docker ID for a container, falling back to the provided id.
 fn get_docker_id(state: &AppState, id: &str) -> String {
     state.containers
         .get(id)
@@ -151,27 +127,22 @@ fn get_docker_id(state: &AppState, id: &str) -> String {
         .unwrap_or_else(|| id.to_string())
 }
 
-/// Update a container's docker_id. Guard is dropped after the update.
 fn update_container_docker_id(state: &AppState, name: &str, new_docker_id: String) {
     if let Some(mut entry) = state.containers.get_mut(name) {
         entry.docker_id = new_docker_id;
     }
-    // Guard is dropped here
+
 }
 
-/// Mark a container as installed. Guard is dropped after the update.
 fn mark_container_installed(state: &AppState, name: &str) {
     if let Some(mut entry) = state.containers.get_mut(name) {
         entry.installed = true;
-        // Clear install script to save memory
+
         entry.install_script = None;
     }
-    // Guard is dropped here
+
 }
 
-/// Replace {{VAR}} placeholders in a startup script with actual values from environment and resources
-/// Also handles backward compatibility: if SERVER_MEMORY was already replaced with a hardcoded value,
-/// it will update -Xmx and -Xms parameters to use the current server_memory
 fn replace_startup_placeholders(
     script: &str,
     environment: &std::collections::HashMap<String, String>,
@@ -179,46 +150,30 @@ fn replace_startup_placeholders(
 ) -> String {
     let mut result = script.to_string();
 
-    // Replace from environment variables
     for (key, value) in environment {
         result = result.replace(&format!("{{{{{}}}}}", key), value);
     }
 
-    // Use server_memory for {{SERVER_MEMORY}} - this is the JVM heap memory
-    // If server_memory is 0, fall back to memory_limit for backward compatibility
     let server_memory = if resources.server_memory > 0 {
         resources.server_memory
     } else {
         resources.memory_limit
     };
 
-    // Replace {{SERVER_MEMORY}} with server_memory from resources
     result = result.replace("{{SERVER_MEMORY}}", &server_memory.to_string());
 
-    // Backward compatibility: If -Xmx is hardcoded with a different value, update it
-    // This handles old containers where {{SERVER_MEMORY}} was already replaced
     let memory_str = server_memory.to_string();
 
-    // Use regex-like replacement for -Xmx parameters
-    // Match patterns like -Xmx1024M, -Xmx2048M, etc.
     let xmx_pattern = regex::Regex::new(r"-Xmx\d+M").ok();
 
     if let Some(re) = xmx_pattern {
-        // Only replace if the current value doesn't match
         if !result.contains(&format!("-Xmx{}M", memory_str)) {
             result = re.replace(&result, format!("-Xmx{}M", memory_str).as_str()).to_string();
         }
     }
 
-    // For -Xms, we typically want it to be a smaller value (e.g., 128M), so don't auto-replace
-    // unless it's set to {{SERVER_MEMORY}} pattern
-
     result
 }
-
-// ============================================================================
-// AUTHENTICATION
-// ============================================================================
 
 fn verify_api_key(headers: &HeaderMap, state: &AppState) -> bool {
     headers
@@ -228,10 +183,6 @@ fn verify_api_key(headers: &HeaderMap, state: &AppState) -> bool {
         .unwrap_or(false)
 }
 
-// ============================================================================
-// CONTAINER CRUD OPERATIONS
-// ============================================================================
-
 pub async fn list_containers(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -240,10 +191,8 @@ pub async fn list_containers(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Snapshot containers - guards released immediately
     let containers = snapshot_containers(&state);
 
-    // Also list Docker containers if needed for reconciliation
     if let Ok(docker_containers) = state.docker.list_containers().await {
         tracing::debug!("Docker has {} containers", docker_containers.len());
     }
@@ -262,10 +211,8 @@ pub async fn create_container(
 
     tracing::info!("Creating container {} with {} allocations", req.name, req.allocations.len());
 
-    // Build port bindings - multiple allocations can map to the same internal port
     let mut port_bindings: HashMap<String, Vec<PortBinding>> = HashMap::new();
 
-    // Helper to add port binding for a protocol
     let add_binding = |bindings: &mut HashMap<String, Vec<PortBinding>>, internal_port: i32, protocol: &str, ip: &str, port: i32| {
         let key = format!("{}/{}", internal_port, protocol);
         bindings
@@ -277,10 +224,9 @@ pub async fn create_container(
             });
     };
 
-    // Handle multiple allocations (new model)
     for alloc in &req.allocations {
         if alloc.protocol == "both" {
-            // Bind both TCP and UDP on the same port
+
             tracing::info!("Adding allocation (both): {}/tcp and {}/udp -> {}:{}", alloc.internal_port, alloc.internal_port, alloc.ip, alloc.port);
             add_binding(&mut port_bindings, alloc.internal_port, "tcp", &alloc.ip, alloc.port);
             add_binding(&mut port_bindings, alloc.internal_port, "udp", &alloc.ip, alloc.port);
@@ -297,7 +243,6 @@ pub async fn create_container(
         }
     }
 
-    // Legacy single allocation support
     if let Some(ref alloc) = req.allocation {
         if req.allocations.is_empty() {
             let key = format!("{}/tcp", alloc.port);
@@ -325,8 +270,6 @@ pub async fn create_container(
 
     tracing::info!("Total port bindings: {:?}", port_bindings);
 
-    // server_memory is for JVM heap, memory_limit is for Docker container
-    // If server_memory is not provided, use memory_limit for backward compatibility
     let server_memory = req.server_memory.unwrap_or(req.memory_limit);
 
     let resources = crate::models::ContainerResources {
@@ -352,10 +295,8 @@ pub async fn create_container(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Check if there's an install script - if so, mark as not installed
     let has_install_script = req.install_script.is_some();
 
-    // Merge environment with SERVER_MEMORY set from server_memory
     let mut environment = req.environment.clone();
     environment.insert("SERVER_MEMORY".to_string(), server_memory.to_string());
 
@@ -369,20 +310,16 @@ pub async fn create_container(
         allocations: req.allocations.clone(),
         resources: resources.clone(),
         install_script: req.install_script.clone(),
-        installed: !has_install_script, // If no install script, consider it installed
+        installed: !has_install_script,
         environment,
         restart_policy: req.restart_policy.clone(),
         tty: req.tty,
     };
 
-    // Insert into state - guard dropped immediately
     state.containers.insert(req.name.clone(), managed.clone());
 
-    // Save state asynchronously (no locks held)
     save_container_state(&state).await;
 
-    // Note: Install script will run on first start, not here
-    // This allows the user to see installation progress in the console
     if has_install_script {
         tracing::info!("Container {} has install script - will run on first start", req.name);
     }
@@ -399,11 +336,9 @@ pub async fn get_container(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Get from managed state - guard dropped immediately
     let container = get_container_clone(&state, &id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // Also get real Docker status
     if let Ok(docker_info) = state.docker.get_container(&container.docker_id).await {
         tracing::debug!("Docker container {} status: {}", id, docker_info.status);
     }
@@ -420,20 +355,15 @@ pub async fn delete_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get container info - guard dropped immediately
     let container = get_container_clone(&state, &id)
         .ok_or((StatusCode::NOT_FOUND, "Container not found".into()))?;
 
-    // Remove from Docker (may already be removed)
     if let Err(e) = state.docker.remove_container(&container.docker_id).await {
         tracing::warn!("Failed to remove Docker container (may not exist): {}", e);
     }
 
-    // Remove from managed state
     state.containers.remove(&id);
 
-
-    // Save state asynchronously
     save_container_state(&state).await;
 
     Ok(Json(()))
@@ -449,18 +379,15 @@ pub async fn update_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-
-    // Get the container from managed state - guard dropped immediately
     let mut container = get_container_clone(&state, &id)
         .ok_or((StatusCode::NOT_FOUND, "Container not found".into()))?;
 
-    // Update resources if provided
     if let Some(memory) = req.memory_limit {
         container.resources.memory_limit = memory;
     }
     if let Some(server_memory) = req.server_memory {
         container.resources.server_memory = server_memory;
-        // Update SERVER_MEMORY in environment so startup script uses new value
+
         container.environment.insert("SERVER_MEMORY".to_string(), server_memory.to_string());
     }
     if let Some(cpu) = req.cpu_limit {
@@ -476,45 +403,34 @@ pub async fn update_container(
         container.resources.io_weight = io;
     }
 
-    // Update allocation if provided (legacy)
     if let Some(alloc) = req.allocation {
         container.allocation = Some(alloc);
     }
 
-    // Update allocations array if provided
     if let Some(allocations) = req.allocations {
         container.allocations = allocations;
     }
 
-    // Try to update Docker container resources (only works on running containers)
     if let Err(e) = state.docker.update_container_resources(
         &container.docker_id,
         &container.resources,
     ).await {
         tracing::warn!("Failed to update Docker container resources (container might be stopped): {}", e);
-        // Don't fail - we still update the managed state
     }
 
-    // Save updated container to state - guard dropped immediately
     state.containers.insert(id.clone(), container.clone());
 
-    // Save container state asynchronously
     save_container_state(&state).await;
 
     Ok(Json(container))
 }
 
-// ============================================================================
-// CONTAINER LIFECYCLE OPERATIONS (with per-container locking)
-// ============================================================================
-
-/// Internal helper for simple container actions (no recreation)
 async fn container_action(
     state: &AppState,
     id: &str,
     action: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // Get docker_id - guard dropped immediately
+
     let docker_id = get_docker_id(state, id);
 
     let result = match action {
@@ -539,7 +455,6 @@ pub async fn start_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get container from state
     let container = get_container_clone(&state, &id);
 
     if let Some(container) = container {
@@ -549,12 +464,11 @@ pub async fn start_container(
             container.allocations.len()
         );
 
-        // Build port bindings from allocations
         let mut port_bindings: HashMap<String, Vec<PortBinding>> = HashMap::new();
 
         for alloc in &container.allocations {
             if alloc.protocol == "both" {
-                // Bind both TCP and UDP on the same port
+
                 tracing::info!("Binding allocation (both): {}/tcp and {}/udp -> {}:{}", alloc.internal_port, alloc.internal_port, alloc.ip, alloc.port);
                 for proto in &["tcp", "udp"] {
                     let key = format!("{}/{}", alloc.internal_port, proto);
@@ -579,7 +493,6 @@ pub async fn start_container(
             }
         }
 
-        // Legacy allocation support
         if let Some(ref alloc) = container.allocation {
             if container.allocations.is_empty() {
                 let key = format!("{}/tcp", alloc.port);
@@ -595,17 +508,12 @@ pub async fn start_container(
 
         tracing::info!("Port bindings: {:?}", port_bindings);
 
-        // Stop the container gracefully using docker stop (sends SIGTERM)
-        // This allows the server to shut down properly and show shutdown logs
-        // Ignore errors - container might not be running
         let _ = state.docker.graceful_stop(&container.docker_id, 30).await;
 
-        // Clean up ALL old containers with this name (force remove now that it's stopped)
         if let Err(e) = state.docker.cleanup_containers_by_name(&container.name).await {
             tracing::warn!("Failed to cleanup old containers: {}", e);
         }
 
-        // Replace {{VAR}} placeholders in startup script with actual values
         let startup_script = container.startup_script.as_ref().map(|s| {
             let replaced = replace_startup_placeholders(s, &container.environment, &container.resources);
             tracing::info!("Original startup script: {}", s);
@@ -615,7 +523,6 @@ pub async fn start_container(
             replaced
         });
 
-        // Create new container with port bindings
         let docker_id = state
             .docker
             .create_container_with_resources(
@@ -630,15 +537,10 @@ pub async fn start_container(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        // Update state with new docker_id
         update_container_docker_id(&state, &container.name, docker_id.clone());
 
-        // Save state
         save_container_state(&state).await;
 
-        // Check if container needs installation (first time setup)
-        // If so, we DON'T start the container here - the WebSocket handler will do installation
-        // and then start the container, streaming logs to the client
         if !container.installed && container.install_script.is_some() {
             tracing::info!("Container {} needs installation - will be triggered via WebSocket", container.name);
             return Ok(Json(serde_json::json!({
@@ -649,7 +551,6 @@ pub async fn start_container(
             })));
         }
 
-        // Start the container (no install needed)
         state.docker
             .start_container(&docker_id)
             .await
@@ -662,7 +563,6 @@ pub async fn start_container(
         })));
     }
 
-    // Fallback for containers not in managed state - just try to start
     let docker_id = id.clone();
     tracing::info!("Starting unmanaged container {} directly", docker_id);
 
@@ -683,14 +583,10 @@ pub async fn stop_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id - guards dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
     tracing::info!("Stopping container {} (docker_id: {})", id, docker_id);
 
-    // Use docker stop which sends SIGTERM - the server will shut down gracefully
-    // and show shutdown logs, then the container will be properly stopped
-    // (preventing "unless-stopped" from restarting it)
     state.docker
         .graceful_stop(&docker_id, 30)
         .await
@@ -708,12 +604,10 @@ pub async fn restart_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id - guard dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
     tracing::info!("Restarting container {} (docker_id: {})", id, docker_id);
 
-    // Simple restart
     state.docker
         .restart_container(&docker_id)
         .await
@@ -722,7 +616,6 @@ pub async fn restart_container(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
-/// Recreate a container (stop, remove, create, start) to apply new configuration like port bindings
 pub async fn recreate_container(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -732,19 +625,16 @@ pub async fn recreate_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get container - guard dropped immediately
     let container = get_container_clone(&state, &id)
         .ok_or((StatusCode::NOT_FOUND, "Container not found in managed state".into()))?;
 
     tracing::info!("Recreating container {} to apply configuration changes", id);
 
-    // Build port bindings from allocations
-    // Multiple allocations can map to the same internal port (e.g., multiple IPs)
     let mut port_bindings: HashMap<String, Vec<PortBinding>> = HashMap::new();
 
     for alloc in &container.allocations {
         if alloc.protocol == "both" {
-            // Bind both TCP and UDP on the same port
+
             tracing::info!("Adding allocation (both): {}/tcp and {}/udp -> {}:{}", alloc.internal_port, alloc.internal_port, alloc.ip, alloc.port);
             for proto in &["tcp", "udp"] {
                 let key = format!("{}/{}", alloc.internal_port, proto);
@@ -760,7 +650,6 @@ pub async fn recreate_container(
             let key = format!("{}/{}", alloc.internal_port, alloc.protocol);
             tracing::info!("Adding allocation: {} -> {}:{}", key, alloc.ip, alloc.port);
 
-            // Append to existing bindings for this port (don't replace)
             port_bindings
                 .entry(key)
                 .or_insert_with(Vec::new)
@@ -771,7 +660,6 @@ pub async fn recreate_container(
         }
     }
 
-    // Legacy allocation support
     if let Some(ref alloc) = container.allocation {
         if container.allocations.is_empty() {
             let key = format!("{}/tcp", alloc.port);
@@ -787,16 +675,12 @@ pub async fn recreate_container(
 
     tracing::info!("Total port bindings: {:?}", port_bindings);
 
-    // Stop the container gracefully using docker stop (sends SIGTERM)
-    // Ignore errors - container might not be running
     let _ = state.docker.graceful_stop(&container.docker_id, 30).await;
 
-    // Clean up ALL old containers with this name (force remove now that it's stopped)
     if let Err(e) = state.docker.cleanup_containers_by_name(&container.name).await {
         tracing::warn!("Failed to cleanup old containers: {}", e);
     }
 
-    // Create new container
     let docker_id = state
         .docker
         .create_container_with_resources(
@@ -811,13 +695,10 @@ pub async fn recreate_container(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Update state with new docker_id
     update_container_docker_id(&state, &container.name, docker_id.clone());
 
-    // Save state
     save_container_state(&state).await;
 
-    // Start the new container
     state.docker
         .start_container(&docker_id)
         .await
@@ -829,7 +710,6 @@ pub async fn recreate_container(
         "dockerId": docker_id
     })))
 }
-
 
 pub async fn kill_container(
     State(state): State<Arc<AppState>>,
@@ -850,10 +730,6 @@ pub async fn kill_container(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
-// ============================================================================
-// CONTAINER COMMANDS AND GRACEFUL STOP
-// ============================================================================
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendCommandRequest {
@@ -870,7 +746,6 @@ pub async fn send_command(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id - guard dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
     state
@@ -903,10 +778,8 @@ pub async fn graceful_stop_container(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id - guard dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
-    // Use docker stop which sends SIGTERM for graceful shutdown
     state
         .docker
         .graceful_stop(&docker_id, req.timeout_secs)
@@ -915,10 +788,6 @@ pub async fn graceful_stop_container(
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
-
-// ============================================================================
-// FTP ACCESS
-// ============================================================================
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -936,15 +805,10 @@ pub async fn create_ftp(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Create FTP access with the provided password
     let creds = create_ftp_access(&state.ftp_state, &id, &req.password);
 
     Ok(Json(creds))
 }
-
-// ============================================================================
-// ALLOCATIONS
-// ============================================================================
 
 pub async fn list_allocations(
     State(state): State<Arc<AppState>>,
@@ -954,7 +818,6 @@ pub async fn list_allocations(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Get available IPs from environment or default
     let ips: Vec<String> = std::env::var("AVAILABLE_IPS")
         .unwrap_or_else(|_| "0.0.0.0".into())
         .split(',')
@@ -963,7 +826,6 @@ pub async fn list_allocations(
 
     let port_range: Vec<i32> = (25565..=25600).collect();
 
-    // Get used ports - guards dropped immediately
     let used_ports: std::collections::HashSet<i32> = {
         state.containers
             .iter()
@@ -996,7 +858,6 @@ pub async fn assign_allocation(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Update allocation - guard dropped at end of scope
     {
         if let Some(mut container) = state.containers.get_mut(&req.container_name) {
             container.allocation = Some(crate::models::AllocationInfo {
@@ -1007,17 +868,11 @@ pub async fn assign_allocation(
             return Err((StatusCode::NOT_FOUND, "Container not found".into()));
         }
     }
-    // Guard dropped here
 
-    // Save state asynchronously
     save_container_state(&state).await;
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
-
-// ============================================================================
-// WEBSOCKET HANDLERS - with proper cleanup and cancellation
-// ============================================================================
 
 pub async fn ws_logs(
     State(state): State<Arc<AppState>>,
@@ -1037,7 +892,6 @@ pub async fn ws_logs(
 async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, container_name: String) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Get container info - guards dropped immediately
     let container_info = {
         state.containers.get(&container_name)
             .map(|entry| (
@@ -1052,7 +906,7 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
     let (docker_id, installed, install_script, image, environment) = match container_info {
         Some(info) => info,
         None => {
-            // Try to find by docker_id prefix
+
             let found = state.containers.iter()
                 .find(|entry| entry.value().docker_id.starts_with(&container_name))
                 .map(|entry| (
@@ -1072,27 +926,23 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
         }
     };
 
-    // Send initial connection message
     if sender.send(Message::Text(format!("\x1b[32m● Connected to container: {}\x1b[0m", container_name))).await.is_err() {
         return;
     }
 
     let (tx, mut rx) = broadcast::channel::<String>(1000);
 
-    // Check if installation is needed
     if !installed {
         if let Some(script) = install_script {
-            // Send install starting message
+
             let _ = sender.send(Message::Text("\x1b[33m● Starting installation...\x1b[0m".to_string())).await;
 
             let tx_for_install = tx.clone();
             let container_name_clone = container_name.clone();
             let state_clone = state.clone();
 
-            // Run installation with logs going to the broadcast channel
             tracing::info!("Running install script for {} via WebSocket", container_name);
 
-            // Create the install future
             let install_fut = state.docker.run_install_in_temp_container_with_logs(
                 &container_name,
                 &image,
@@ -1101,16 +951,14 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
                 Some(tx_for_install),
             );
 
-            // Pin the future for use in select
             tokio::pin!(install_fut);
 
-            // Forward install logs to WebSocket while install is running
             let install_result = loop {
                 tokio::select! {
                     biased;
 
                     result = &mut install_fut => {
-                        // Drain remaining logs
+
                         while let Ok(log) = rx.try_recv() {
                             let _ = sender.send(Message::Text(log)).await;
                         }
@@ -1136,11 +984,8 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
                     mark_container_installed(&state_clone, &container_name_clone);
                     save_container_state(&state_clone).await;
 
-                    // Don't auto-start - let the user click Start
                     let _ = sender.send(Message::Text("\x1b[32m● Installation complete! Click Start to launch the server.\x1b[0m".to_string())).await;
 
-                    // Keep connection open but don't start the container
-                    // The user will click Start which triggers the HTTP endpoint
                 }
                 Err(e) => {
                     tracing::error!("Install failed for {}: {}", container_name, e);
@@ -1153,18 +998,13 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
         }
     }
 
-    // Get the current docker_id after potential install
     let docker_id = get_docker_id(&state, &container_name);
 
-    // Start streaming logs
     state.docker.stream_logs(&docker_id, tx);
 
-
-    // Clone for the receive task
     let docker_id_for_cmd = docker_id.clone();
     let state_for_cmd = state.clone();
 
-    // Use tokio::select! for clean cancellation
     let send_task = async {
         loop {
             match rx.recv().await {
@@ -1175,10 +1015,10 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("Log receiver lagged by {} messages", n);
-                    // Continue receiving
+
                 }
                 Err(broadcast::error::RecvError::Closed) => {
-                    // Stream ended - send close message
+
                     let _ = sender.send(Message::Close(None)).await;
                     break;
                 }
@@ -1190,7 +1030,7 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
         while let Some(msg) = receiver.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    // Handle incoming command from client
+
                     let text = text.trim();
                     if !text.is_empty() {
                         tracing::info!("Received command for container {}: {}", docker_id_for_cmd, text);
@@ -1206,7 +1046,6 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
         }
     };
 
-    // Both tasks complete cleanly when either finishes
     tokio::select! {
         _ = send_task => {
             tracing::debug!("Log send task completed for {}", container_name);
@@ -1219,10 +1058,6 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
     tracing::debug!("WebSocket logs handler completed for {}", container_name);
 }
 
-// ============================================================================
-// SYSTEM RESOURCES
-// ============================================================================
-
 pub async fn get_system_resources(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1231,7 +1066,6 @@ pub async fn get_system_resources(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Use spawn_blocking for sysinfo operations which may block
     let result = tokio::task::spawn_blocking(|| {
         let mut sys = sysinfo::System::new_all();
         sys.refresh_all();
@@ -1287,7 +1121,6 @@ async fn handle_system_stats_socket(socket: WebSocket) {
     let send_task = async {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
 
-        // Use spawn_blocking for the initial system creation
         let sys = tokio::task::spawn_blocking(|| {
             let mut sys = sysinfo::System::new_all();
             sys.refresh_all();
@@ -1303,9 +1136,7 @@ async fn handle_system_stats_socket(socket: WebSocket) {
         loop {
             interval.tick().await;
 
-            // Use spawn_blocking for refreshing system stats
             let stats = {
-                // Clone isn't available, so we need to refresh in the blocking thread
                 let stats_result = tokio::task::spawn_blocking(move || {
                     sys.refresh_memory();
                     sys.refresh_cpu_all();
@@ -1367,10 +1198,6 @@ async fn handle_system_stats_socket(socket: WebSocket) {
     }
 }
 
-// ============================================================================
-// CONTAINER STATS
-// ============================================================================
-
 pub async fn get_container_stats(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1380,7 +1207,6 @@ pub async fn get_container_stats(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id - guard dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
     state
@@ -1410,10 +1236,8 @@ pub async fn get_container_status(
         return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
     }
 
-    // Get docker_id - guard dropped immediately
     let docker_id = get_docker_id(&state, &id);
 
-    // Get container info from Docker
     let info = state.docker.get_container(&docker_id).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -1446,7 +1270,6 @@ pub async fn ws_container_stats(
 async fn handle_container_stats_socket(socket: WebSocket, state: Arc<AppState>, container_name: String) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Find docker_id - guards dropped immediately
     let docker_id = {
         state.containers.iter()
             .find(|entry| entry.key() == &container_name || entry.value().docker_id.starts_with(&container_name))
@@ -1488,10 +1311,6 @@ async fn handle_container_stats_socket(socket: WebSocket, state: Arc<AppState>, 
     tracing::debug!("WebSocket container stats handler completed for {}", container_name);
 }
 
-// ============================================================================
-// FILE MANAGEMENT
-// ============================================================================
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
@@ -1517,7 +1336,6 @@ pub async fn list_files(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Use same base path as FTP and Docker volume mounts
     let base_path = std::env::var("FTP_BASE_PATH")
         .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
             .unwrap_or_else(|_| "/data/raptor".into()));
@@ -1635,7 +1453,6 @@ pub async fn write_file(
         }
     }
 
-    // Handle base64 encoding for binary files
     let content_bytes = if req.encoding.as_deref() == Some("base64") {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD
@@ -1723,15 +1540,10 @@ pub async fn delete_file(
     Ok(Json(serde_json::json!({"message": "Deleted successfully"})))
 }
 
-// ============================================================================
-// CHUNKED UPLOAD SUPPORT
-// ============================================================================
-
 use std::collections::HashMap as StdHashMap;
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
 
-/// Storage for chunked uploads in progress on the daemon
 struct DaemonChunkUpload {
     path: String,
     total_chunks: u32,
@@ -1750,10 +1562,9 @@ pub struct WriteChunkRequest {
     pub chunk_index: u32,
     pub total_chunks: u32,
     pub path: String,
-    pub content: String, // Base64 encoded chunk
+    pub content: String,
 }
 
-/// Write a single chunk to disk
 pub async fn write_file_chunk(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1775,7 +1586,6 @@ pub async fn write_file_chunk(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // Decode chunk content
     use base64::Engine;
     let chunk_data = base64::engine::general_purpose::STANDARD
         .decode(&req.content)
@@ -1787,7 +1597,6 @@ pub async fn write_file_chunk(
     let storage_key = format!("{}:{}", container_name, req.upload_id);
     let mut storage = DAEMON_CHUNK_STORAGE.lock().await;
 
-    // Clean up old uploads (older than 30 minutes)
     let now = std::time::Instant::now();
     let keys_to_remove: Vec<_> = storage
         .iter()
@@ -1800,7 +1609,6 @@ pub async fn write_file_chunk(
         }
     }
 
-    // Create or get upload tracking
     let temp_dir = container_path.join(".uploads").join(&req.upload_id);
     
     let upload = storage.entry(storage_key.clone()).or_insert_with(|| {
@@ -1813,13 +1621,11 @@ pub async fn write_file_chunk(
         }
     });
 
-    // Ensure temp directory exists
     if let Err(e) = tokio::fs::create_dir_all(&upload.temp_dir).await {
         tracing::error!("write_file_chunk: failed to create temp dir: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    // Write chunk to temp file
     let chunk_file = upload.temp_dir.join(format!("chunk_{:06}", req.chunk_index));
     if let Err(e) = tokio::fs::write(&chunk_file, &chunk_data).await {
         tracing::error!("write_file_chunk: failed to write chunk: {}", e);
@@ -1836,18 +1642,16 @@ pub async fn write_file_chunk(
         req.path
     );
 
-    // Check if all chunks received
     if upload.received_chunks.len() == req.total_chunks as usize {
-        // Assemble the file
+
         let temp_dir = upload.temp_dir.clone();
         let path = upload.path.clone();
         let total = req.total_chunks;
         
-        // Remove from storage before assembling
-        storage.remove(&storage_key);
-        drop(storage); // Release lock
 
-        // Ensure parent directory exists
+        storage.remove(&storage_key);
+        drop(storage);
+
         if let Some(parent) = final_path.parent() {
             if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 tracing::error!("write_file_chunk: failed to create parent dirs: {}", e);
@@ -1856,7 +1660,6 @@ pub async fn write_file_chunk(
             }
         }
 
-        // Create or truncate final file
         let mut final_file = match tokio::fs::File::create(&final_path).await {
             Ok(f) => f,
             Err(e) => {
@@ -1866,7 +1669,6 @@ pub async fn write_file_chunk(
             }
         };
 
-        // Append all chunks in order
         use tokio::io::AsyncWriteExt;
         let mut total_bytes = 0u64;
         for i in 0..total {
@@ -1888,12 +1690,10 @@ pub async fn write_file_chunk(
             }
         }
 
-        // Flush and sync
         if let Err(e) = final_file.sync_all().await {
             tracing::error!("write_file_chunk: failed to sync file: {}", e);
         }
 
-        // Clean up temp directory
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
         tracing::info!(
@@ -1917,14 +1717,6 @@ pub async fn write_file_chunk(
         "total": req.total_chunks
     })))
 }
-
-/// Database server handler functions
-/// These handlers manage the lifecycle of database servers (e.g., MySQL, PostgreSQL)
-/// They are separate from container handlers as databases may have different lifecycles
-
-// ============================================================================
-// DATABASE SERVER HANDLERS
-// ============================================================================
 
 pub async fn list_database_servers(
     State(state): State<Arc<AppState>>,
@@ -1969,7 +1761,6 @@ pub async fn delete_database_server(
     let server = state.database_manager.get_server(&id)
         .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
 
-    // Delete the container if it exists
     if let Err(e) = database_manager::delete_database_container(&server).await {
         tracing::warn!("Failed to delete database container: {}", e);
     }
@@ -2027,11 +1818,9 @@ pub async fn restart_database_server(
     let server = state.database_manager.get_server(&id)
         .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
 
-    // Stop first (ignore errors if not running)
     let _ = database_manager::stop_database_container(&server).await;
     state.database_manager.update_server_status(&id, "restarting", None);
 
-    // Start
     let container_id = database_manager::create_and_start_database_container(&server)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;

@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::config::Config;
 
-/// Default protocol for port mappings
 fn default_protocol() -> String {
     "tcp".to_string()
 }
@@ -16,7 +15,6 @@ pub struct AppState {
     pub config: Config,
 }
 
-// Database models
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
@@ -66,7 +64,6 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    /// Get the base URL for this daemon (http or https based on secure flag)
     pub fn base_url(&self) -> String {
         let scheme = if self.secure { "https" } else { "http" };
         format!("{}://{}:{}", scheme, self.host, self.port)
@@ -188,7 +185,6 @@ pub struct CreateContainerAllocationRequest {
     pub is_primary: Option<bool>,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInvite {
@@ -217,7 +213,6 @@ pub struct AcceptInviteRequest {
     pub password: String,
 }
 
-// Request/Response DTOs
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
@@ -269,7 +264,6 @@ pub struct RoleResponse {
     pub permissions: serde_json::Value,
 }
 
-// Registration with email
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
     pub username: String,
@@ -277,7 +271,6 @@ pub struct RegisterRequest {
     pub password: String,
 }
 
-// Password reset requests
 #[derive(Debug, Deserialize)]
 pub struct ForgotPasswordRequest {
     pub email: String,
@@ -288,7 +281,6 @@ pub struct ResetPasswordRequest {
     pub token: String,
     pub password: String,
 }
-
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -310,30 +302,20 @@ pub struct PortMapping {
     pub protocol: String,
 }
 
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateContainerRequest {
     pub daemon_id: Uuid,
     pub name: String,
-    /// Flake ID - if provided, image and startup_script will be taken from the flake
     pub flake_id: Option<Uuid>,
-    /// Docker image - required if flake_id is not provided
     pub image: Option<String>,
-    /// Startup script - optional, will use flake's startupCommand if flake_id is provided
     pub startup_script: Option<String>,
-    /// Command to execute for graceful stop (e.g., "stop" for Minecraft)
     pub stop_command: Option<String>,
-    /// Primary allocation ID (will be marked as is_primary=true)
     pub allocation_id: Option<Uuid>,
-    /// Additional allocation IDs (is_primary=false)
     #[serde(default)]
     pub additional_allocations: Vec<Uuid>,
-    /// Docker container memory limit in MB (should be higher than server_memory for JVM overhead)
     #[serde(default = "default_memory")]
     pub memory_limit: i64,
-    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
-    /// If not set, defaults to memory_limit for backward compatibility
     pub server_memory: Option<i64>,
     #[serde(default = "default_cpu")]
     pub cpu_limit: f64,
@@ -345,9 +327,7 @@ pub struct CreateContainerRequest {
     pub io_weight: i32,
     #[serde(default)]
     pub ports: Vec<PortMapping>,
-    /// User ID to assign the container to (admin only, defaults to current user)
     pub user_id: Option<Uuid>,
-    /// Variable values for the flake (envVariable -> value)
     #[serde(default)]
     pub variables: std::collections::HashMap<String, String>,
 }
@@ -366,7 +346,6 @@ pub struct CreateAllocationRequest {
     pub protocol: Option<String>,
 }
 
-// JWT Claims
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub sub: Uuid,
@@ -379,13 +358,13 @@ pub struct Claims {
 
 impl Claims {
     pub fn has_permission(&self, permission: &str) -> bool {
-        // Check for wildcard permission
+
         if let Some(all) = self.permissions.get("*") {
             if all.as_bool().unwrap_or(false) {
                 return true;
             }
         }
-        // Check for specific permission
+
         if let Some(perm) = self.permissions.get(permission) {
             return perm.as_bool().unwrap_or(false);
         }
@@ -401,7 +380,6 @@ impl Claims {
     }
 }
 
-// Shared Database Server (PostgreSQL or MySQL container)
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseServer {
@@ -418,7 +396,6 @@ pub struct DatabaseServer {
     pub updated_at: DateTime<Utc>,
 }
 
-// User database instances (databases within shared containers)
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct UserDatabase {
@@ -438,7 +415,7 @@ pub struct UserDatabase {
 #[serde(rename_all = "camelCase")]
 pub struct CreateDatabaseRequest {
     pub db_type: String, // "postgresql" or "mysql"
-    pub db_name: Option<String>, // Optional, will generate if not provided
+    pub db_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -471,7 +448,6 @@ pub struct DatabaseServerResponse {
     pub updated_at: DateTime<Utc>,
 }
 
-// Admin response that includes sensitive data
 #[derive(Debug, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseServerAdminResponse {

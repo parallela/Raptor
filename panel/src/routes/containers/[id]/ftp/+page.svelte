@@ -28,7 +28,6 @@
         }
     });
 
-    // Reload daemon info when container changes
     $: if (container?.daemonId && !daemon) {
         api.getDaemon(container.daemonId).then(d => daemon = d).catch(() => {});
     }
@@ -48,7 +47,6 @@
             toast.success('FTP password set');
             sftpPassword = '';
             sftpPasswordConfirm = '';
-            // Reload container to update hasSftpPassword
             const updated = await api.getContainer(containerId);
             containerStore.set(updated);
         } catch (e: any) {
@@ -65,7 +63,6 @@
         setTimeout(() => copiedField = null, 2000);
     }
 
-    // Get FTP hostname from daemon (FTP runs on the daemon, not the container)
     $: ftpHost = daemon?.host || container?.allocationIp || 'localhost';
     $: ftpPort = 2121;
     $: ftpUsername = containerId.slice(0, 8);
@@ -191,7 +188,7 @@
                 <div>
                     <label class="block text-xs text-dark-400 mb-1">FTP URL</label>
                     <div class="flex items-center gap-2">
-                        <code class="flex-1 bg-dark-800 text-primary-400 px-3 py-2 rounded text-sm font-mono truncate">ftp://{ftpUsername}@{ftpHost}:{ftpPort}</code>
+                        <code class="flex-1 bg-dark-800 text-primary-400 px-3 py-2 rounded text-sm font-mono truncate">ftp:
                         <button
                             on:click={() => copyToClipboard(`ftp://${ftpUsername}@${ftpHost}:${ftpPort}`, 'url')}
                             class="p-2 text-dark-400 hover:text-white hover:bg-dark-700 rounded transition-colors"

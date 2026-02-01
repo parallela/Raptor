@@ -57,7 +57,7 @@ pub struct UpdateDaemonRequest {
 async fn check_daemon_status(host: &str, port: i32, api_key: &str, secure: bool) -> (String, Option<SystemResources>) {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .danger_accept_invalid_certs(true) // Accept self-signed certs for daemon communication
+        .danger_accept_invalid_certs(true)
         .build()
     {
         Ok(c) => c,
@@ -295,7 +295,7 @@ pub async fn ping_daemon(
 
     match health_result {
         Ok(resp) if resp.status().is_success() => {
-            // Try to get system info
+
             let system_url = format!("{}://{}:{}/system", scheme, req.host, req.port);
             let system = match client
                 .get(&system_url)

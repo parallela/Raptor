@@ -48,7 +48,6 @@
     let importJson = '';
     let importing = false;
 
-    // Create form
     let newFlake = {
         name: '',
         slug: '',

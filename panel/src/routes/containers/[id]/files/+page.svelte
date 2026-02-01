@@ -26,24 +26,19 @@
     let showDeleteModal = false;
     let deleting = false;
 
-    // Drag and drop state
     let isDragging = false;
-    let dragCounter = 0; // Counter to track drag enter/leave events
+    let dragCounter = 0;
     let uploading = false;
     let uploadProgress = 0;
 
-    // Selection mode state
     let selectMode = false;
 
-    // Navigation state
     let showNavSidebar = true;
 
     $: containerId = $page.params.id as string;
     $: container = $containerStore;
 
-    // Exit select mode when no files are selected
     $: if (selectedFiles.size === 0 && selectMode) {
-        // Keep select mode active if user explicitly enabled it
     }
 
     onMount(() => {
@@ -69,14 +64,12 @@
             const newPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
             loadFiles(newPath);
         } else {
-            // Navigate to file editor
             const encodedPath = encodeURIComponent(currentPath === '/' ? file.name : `${currentPath.slice(1)}/${file.name}`);
             goto(`/containers/${containerId}/files/${encodedPath}`);
         }
     }
 
     function handleFileClick(file: FileEntry, event: MouseEvent) {
-        // In select mode, toggle selection for files only (folders navigate)
         if (selectMode && !file.isDir) {
             toggleFileSelection(file.name, event);
         } else {
@@ -114,7 +107,6 @@
 
     function toggleFileSelection(fileName: string, event: MouseEvent) {
         if (event.shiftKey && selectedFiles.size > 0) {
-            // Range selection
             const fileNames = files.map(f => f.name);
             const lastSelected = Array.from(selectedFiles).pop()!;
             const lastIndex = fileNames.indexOf(lastSelected);
@@ -126,7 +118,6 @@
             }
             selectedFiles = selectedFiles;
         } else if (event.ctrlKey || event.metaKey) {
-            // Toggle individual selection
             if (selectedFiles.has(fileName)) {
                 selectedFiles.delete(fileName);
             } else {
@@ -134,7 +125,6 @@
             }
             selectedFiles = selectedFiles;
         } else {
-            // Toggle single selection in select mode
             if (selectedFiles.has(fileName)) {
                 selectedFiles.delete(fileName);
             } else {
@@ -164,7 +154,6 @@
         selectedFiles = new Set();
     }
 
-    // Drag and drop handlers
     function handleDragEnter(event: DragEvent) {
         event.preventDefault();
         dragCounter++;
@@ -207,7 +196,6 @@
                 const path = currentPath === '/' ? file.name : `${currentPath}/${file.name}`;
                 await api.uploadContainerFile(containerId, path.startsWith('/') ? path.slice(1) : path, file, (progress) => {
                     currentFileProgress = progress;
-                    // Overall progress: completed files + current file progress
                     uploadProgress = Math.round(((completed + (progress / 100)) / total) * 100);
                 });
                 completed++;
@@ -262,7 +250,6 @@
         }
     }
 
-    // File input upload
     let fileInput: HTMLInputElement;
 
     function triggerUpload() {
@@ -306,7 +293,6 @@
         }
     }
 
-    // Get file extension for icon styling
     function getFileType(fileName: string): string {
         const ext = fileName.split('.').pop()?.toLowerCase() || '';
         const types: Record<string, string> = {
@@ -324,7 +310,6 @@
         return types[ext] || 'default';
     }
 
-    // Breadcrumb helpers
     $: breadcrumbs = currentPath === '/' ? [] : currentPath.split('/').filter(Boolean).map((part, i, arr) => ({
         name: part,
         path: '/' + arr.slice(0, i + 1).join('/')

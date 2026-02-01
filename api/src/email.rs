@@ -31,7 +31,7 @@ impl EmailService {
     }
 
     fn load_template(name: &str) -> String {
-        // Try multiple paths for template loading
+
         let paths = [
             format!("templates/{}.html", name),
             format!("/app/templates/{}.html", name),
@@ -46,7 +46,6 @@ impl EmailService {
 
         tracing::warn!("Template templates/{}.html not found in any location, using embedded fallback", name);
 
-        // Return embedded fallback templates based on name
         match name {
             "invite" => r#"<!DOCTYPE html>
 <html>

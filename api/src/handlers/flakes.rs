@@ -37,7 +37,6 @@ fn default_restart_policy() -> String {
     "unless-stopped".to_string()
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct FlakeVariable {
@@ -75,7 +74,6 @@ pub struct CreateFlakeRequest {
     pub config_files: serde_json::Value,
     pub startup_detection: Option<String>,
     pub install_script: Option<String>,
-    /// Docker restart policy: "no", "always", "on-failure", "unless-stopped"
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
     #[serde(default)]
@@ -109,12 +107,10 @@ fn default_true() -> bool {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFlakeRequest {
-    /// The flake JSON data (also supports Pterodactyl egg format for backward compatibility)
     #[serde(alias = "eggJson")]
     pub flake_json: serde_json::Value,
 }
 
-/// List all flakes
 pub async fn list_flakes(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -130,7 +126,6 @@ pub async fn list_flakes(
     Ok(Json(flakes))
 }
 
-/// Get a flake with its variables
 pub async fn get_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -156,7 +151,6 @@ pub async fn get_flake(
     Ok(Json(FlakeWithVariables { flake, variables }))
 }
 
-/// Create a new flake (admin only)
 pub async fn create_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -212,7 +206,6 @@ pub async fn create_flake(
     Ok(Json(FlakeWithVariables { flake, variables }))
 }
 
-/// Delete a flake (admin only)
 pub async fn delete_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -230,7 +223,6 @@ pub async fn delete_flake(
     Ok(Json(serde_json::json!({ "message": "Flake deleted" })))
 }
 
-/// Import a flake from JSON (also supports Pterodactyl egg format)
 pub async fn import_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -247,7 +239,6 @@ pub async fn import_flake(
         .map(|s| s.to_string())
         .unwrap_or_else(|| name.to_lowercase().replace(' ', "-").replace("(", "").replace(")", ""));
 
-    // Check if slug exists and generate a unique one if needed
     let mut slug = base_slug.clone();
     let mut counter = 1;
     loop {
@@ -269,7 +260,6 @@ pub async fn import_flake(
         .or_else(|| flake_data["startup_command"].as_str())
         .unwrap_or("").to_string();
 
-    // Use provided dockerImage or default to our artifact
     let docker_image = flake_data["dockerImage"].as_str()
         .or_else(|| flake_data["docker_image"].as_str())
         .unwrap_or("artifacts.lstan.eu/java:21").to_string();
@@ -298,24 +288,20 @@ pub async fn import_flake(
         }
     }
 
-    // Get restart policy from flake data or default based on type
-    // Game servers (Java/Minecraft) should use "unless-stopped" so they restart when user types "stop"
-    // Node.js and other services should use "on-failure" so they don't restart on manual stop
     let restart_policy = flake_data["restartPolicy"].as_str()
         .or_else(|| flake_data["restart_policy"].as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
-            // Default based on docker image type
+
             if docker_image.contains("java") || docker_image.contains("yolk") {
                 "unless-stopped".to_string()
             } else if docker_image.contains("node") {
                 "on-failure".to_string()
             } else {
-                "unless-stopped".to_string() // Default for game servers
+                "unless-stopped".to_string()
             }
         });
 
-    // Use a transaction to ensure atomicity
     let mut tx = state.db.begin().await?;
 
     let flake_id = Uuid::new_v4();
@@ -342,7 +328,7 @@ pub async fn import_flake(
     let mut variables = Vec::new();
     let vars_array = flake_data["variables"].as_array();
     if let Some(vars) = vars_array {
-        // Track env variables to avoid duplicates within the same import
+
         let mut seen_env_vars = std::collections::HashSet::new();
 
         for (idx, var) in vars.iter().enumerate() {
@@ -350,7 +336,6 @@ pub async fn import_flake(
                 .or_else(|| var["envVariable"].as_str())
                 .unwrap_or("VAR").to_string();
 
-            // Skip duplicate env variables
             if seen_env_vars.contains(&env_var) {
                 continue;
             }
@@ -377,13 +362,11 @@ pub async fn import_flake(
         }
     }
 
-    // Commit the transaction
     tx.commit().await?;
 
     Ok(Json(FlakeWithVariables { flake, variables }))
 }
 
-/// Export a flake as JSON (Pterodactyl-compatible format)
 pub async fn export_flake(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,

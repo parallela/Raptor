@@ -15,11 +15,11 @@ export interface Role {
 }
 
 export interface ResourceLimits {
-    memory: number;      // Memory in MB
-    cpu: number;         // CPU cores (can be decimal like 0.5)
-    disk: number;        // Disk space in MB
-    swap?: number;       // Swap in MB
-    io?: number;         // IO weight (10-1000)
+    memory: number;
+    cpu: number;
+    disk: number;
+    swap?: number;
+    io?: number;
 }
 
 export interface ContainerAllocation {
@@ -42,12 +42,9 @@ export interface Container {
     status: string;
     sftpUser?: string;
     sftpPass?: string;
-    // Allocations array (new model)
     allocations?: ContainerAllocation[];
-    // Primary allocation convenience fields
     allocationIp?: string;
     allocationPort?: number;
-    // Resource limits
     memoryLimit?: number;
     cpuLimit?: number;
     diskLimit?: number;
@@ -65,7 +62,6 @@ export interface Daemon {
     apiKey: string;
     location?: string;
     secure?: boolean;
-    // Daemon capacity
     totalMemory?: number;
     totalCpu?: number;
     totalDisk?: number;

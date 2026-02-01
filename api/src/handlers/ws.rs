@@ -18,7 +18,7 @@ pub async fn container_logs(
     Query(params): Query<HashMap<String, String>>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, AppError> {
-    // Validate token from query param
+
     let token = params.get("token").ok_or(AppError::Unauthorized)?;
     validate_token(token, &state.config.jwt_secret)?;
 
@@ -53,7 +53,6 @@ fn validate_token(token: &str, secret: &str) -> Result<(), AppError> {
 async fn handle_logs_ws(socket: WebSocket, daemon: Daemon, container: Container) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Connect to daemon WebSocket with API key
     let ws_protocol = if daemon.secure { "wss" } else { "ws" };
     let daemon_ws_url = format!(
         "{}://{}:{}/ws/containers/{}/logs?api_key={}",
@@ -78,7 +77,6 @@ async fn handle_logs_ws(socket: WebSocket, daemon: Daemon, container: Container)
 
     let (mut daemon_sender, mut daemon_receiver) = ws_stream.split();
 
-    // Forward messages from daemon to client
     let forward_to_client = async {
         while let Some(msg) = daemon_receiver.next().await {
             match msg {
@@ -102,7 +100,6 @@ async fn handle_logs_ws(socket: WebSocket, daemon: Daemon, container: Container)
         }
     };
 
-    // Forward messages from client to daemon
     let forward_to_daemon = async {
         while let Some(msg) = receiver.next().await {
             match msg {
@@ -134,7 +131,7 @@ pub async fn container_stats(
     Query(params): Query<HashMap<String, String>>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, AppError> {
-    // Validate token from query param
+
     let token = params.get("token").ok_or(AppError::Unauthorized)?;
     validate_token(token, &state.config.jwt_secret)?;
 
@@ -156,7 +153,6 @@ pub async fn container_stats(
 async fn handle_stats_ws(socket: WebSocket, daemon: Daemon, container: Container) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Connect to daemon WebSocket for stats
     let ws_protocol = if daemon.secure { "wss" } else { "ws" };
     let daemon_ws_url = format!(
         "{}://{}:{}/ws/containers/{}/stats?api_key={}",
@@ -181,7 +177,6 @@ async fn handle_stats_ws(socket: WebSocket, daemon: Daemon, container: Container
 
     let (mut daemon_sender, mut daemon_receiver) = ws_stream.split();
 
-    // Forward stats from daemon to client
     let forward_to_client = async {
         while let Some(msg) = daemon_receiver.next().await {
             match msg {
@@ -200,7 +195,6 @@ async fn handle_stats_ws(socket: WebSocket, daemon: Daemon, container: Container
         }
     };
 
-    // Handle client disconnect
     let recv_task = async {
         while let Some(msg) = receiver.next().await {
             match msg {

@@ -41,14 +41,10 @@
     onMount(async () => {
         if (!browser) return;
 
-        // Dynamic import for Monaco Editor
         monaco = await import('monaco-editor');
 
-        // Configure Monaco environment
         self.MonacoEnvironment = {
             getWorker: function (_moduleId: any, label: string) {
-                // For simplicity, we'll use the basic editor without workers
-                // This reduces bundle size and complexity
                 return null as any;
             }
         };
@@ -83,7 +79,6 @@
             padding: { top: 10, bottom: 10 },
         });
 
-        // Listen for content changes
         editor.onDidChangeModelContent(() => {
             const newValue = editor.getValue();
             if (newValue !== value) {
@@ -92,7 +87,6 @@
             }
         });
 
-        // Add keyboard shortcuts
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
             dispatch('save');
         });

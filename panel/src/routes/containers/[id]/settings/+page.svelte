@@ -32,7 +32,6 @@
     $: availableAllocations = $availableAllocationsStore;
     $: actionLoading = $actionLoadingStore;
 
-    // Initialize edit values when container loads
     $: if (container && editMemory === 0) {
         editMemory = container.memoryLimit || 1024;
         editServerMemory = (container as any).serverMemory || container.memoryLimit || 1024;

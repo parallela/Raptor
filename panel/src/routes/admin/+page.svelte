@@ -25,7 +25,6 @@
                 api.listAllContainers().catch(() => api.listContainers()),
                 api.listDaemons(),
             ]);
-            // Try to load users (admin only)
             try {
                 users = await api.listUsers();
             } catch {

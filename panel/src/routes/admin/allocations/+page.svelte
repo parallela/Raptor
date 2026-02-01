@@ -13,6 +13,15 @@
     let showCreate = false;
     let creating = false;
 
+    let showEdit = false;
+    let editing = false;
+    let editAllocation: Allocation | null = null;
+    let editForm = {
+        ip: '',
+        port: 25565,
+        protocol: 'tcp',
+    };
+
     let newAllocation = {
         daemonId: '',
         ip: '',
@@ -62,6 +71,36 @@
         }
     }
 
+    function openEditModal(alloc: Allocation) {
+        editAllocation = alloc;
+        editForm = {
+            ip: alloc.ip,
+            port: alloc.port,
+            protocol: alloc.protocol || 'tcp',
+        };
+        showEdit = true;
+    }
+
+    async function updateAllocation() {
+        if (!editAllocation) return;
+        editing = true;
+        try {
+            await api.updateAllocation(editAllocation.id, {
+                ip: editForm.ip,
+                port: editForm.port,
+                protocol: editForm.protocol,
+            });
+            showEdit = false;
+            editAllocation = null;
+            await loadData();
+            toast.success('Allocation updated successfully');
+        } catch (e: any) {
+            toast.error(e.message || 'Failed to update allocation');
+        } finally {
+            editing = false;
+        }
+    }
+
     async function deleteAllocation(id: string) {
         if (!confirm('Are you sure you want to delete this allocation?')) return;
         try {
@@ -74,7 +113,6 @@
     }
 
     async function toggleProtocol(alloc: Allocation) {
-        // Cycle: tcp -> udp -> both -> tcp
         const protocolCycle: Record<string, string> = {
             'tcp': 'udp',
             'udp': 'both',
@@ -202,6 +240,112 @@
         </div>
     {/if}
 
+    <!-- Edit Modal -->
+    {#if showEdit && editAllocation}
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+                class="absolute inset-0 bg-dark-950/80 backdrop-blur-sm"
+                on:click={() => { showEdit = false; editAllocation = null; }}
+                on:keydown={(e) => e.key === 'Escape' && (showEdit = false)}
+                role="button"
+                tabindex="-1"
+            ></div>
+
+            <div class="relative w-full max-w-lg card p-6 animate-slide-up">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-semibold text-white">Edit Allocation</h2>
+                    <button
+                        on:click={() => { showEdit = false; editAllocation = null; }}
+                        class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/50 transition-colors duration-200"
+                    >
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <form on:submit|preventDefault={updateAllocation} class="space-y-5">
+                    <div class="input-group">
+                        <span class="input-label">Node / Daemon</span>
+                        <div class="input bg-dark-800/50 text-dark-400 cursor-not-allowed">
+                            {getDaemonName(editAllocation.daemonId)}
+                        </div>
+                        <p class="text-xs text-dark-500 mt-1">Node cannot be changed. Create a new allocation on a different node if needed.</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="input-group">
+                            <label for="edit-ip" class="input-label">IP Address</label>
+                            <input
+                                type="text"
+                                id="edit-ip"
+                                bind:value={editForm.ip}
+                                class="input font-mono"
+                                placeholder="0.0.0.0"
+                                required
+                                disabled={!!editAllocation.containerId}
+                            />
+                        </div>
+                        <div class="input-group">
+                            <label for="edit-port" class="input-label">Port</label>
+                            <input
+                                type="number"
+                                id="edit-port"
+                                bind:value={editForm.port}
+                                class="input font-mono"
+                                min="1"
+                                max="65535"
+                                required
+                                disabled={!!editAllocation.containerId}
+                            />
+                        </div>
+                    </div>
+
+                    {#if editAllocation.containerId}
+                        <p class="text-xs text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg">
+                            <svg class="w-4 h-4 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            IP and Port cannot be changed while allocation is in use. Only protocol can be modified.
+                        </p>
+                    {/if}
+
+                    <div class="input-group">
+                        <label for="edit-protocol" class="input-label">Protocol</label>
+                        <Select
+                            id="edit-protocol"
+                            bind:value={editForm.protocol}
+                            options={[
+                                { value: 'tcp', label: 'TCP only' },
+                                { value: 'udp', label: 'UDP only' },
+                                { value: 'both', label: 'TCP + UDP (both protocols)' },
+                            ]}
+                            required
+                        />
+                        <p class="text-xs text-dark-500 mt-1">Protocol changes will take effect on container restart.</p>
+                    </div>
+
+                    <div class="flex gap-3 pt-4">
+                        <button type="submit" class="btn-primary flex-1" disabled={editing}>
+                            {#if editing}
+                                <span class="spinner"></span>
+                                Saving...
+                            {:else}
+                                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                                Save Changes
+                            {/if}
+                        </button>
+                        <button type="button" on:click={() => { showEdit = false; editAllocation = null; }} class="btn-secondary">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    {/if}
+
     {#if loading}
         <div class="flex items-center justify-center py-20">
             <div class="text-center">
@@ -238,10 +382,10 @@
                                 <button
                                     on:click={() => toggleProtocol(alloc)}
                                     class="px-2 py-1 rounded text-xs font-mono uppercase cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-offset-dark-900 transition-all {
-                                        alloc.protocol === 'both' 
-                                            ? 'bg-purple-500/20 text-purple-400 hover:ring-purple-500/50' 
-                                            : alloc.protocol === 'udp' 
-                                                ? 'bg-amber-500/20 text-amber-400 hover:ring-amber-500/50' 
+                                        alloc.protocol === 'both'
+                                            ? 'bg-purple-500/20 text-purple-400 hover:ring-purple-500/50'
+                                            : alloc.protocol === 'udp'
+                                                ? 'bg-amber-500/20 text-amber-400 hover:ring-amber-500/50'
                                                 : 'bg-blue-500/20 text-blue-400 hover:ring-blue-500/50'
                                     }"
                                     title="Click to cycle protocol: TCP → UDP → Both → TCP (will take effect on container restart)"
@@ -267,17 +411,29 @@
                                 {/if}
                             </td>
                             <td class="text-right">
-                                <button
-                                    on:click={() => deleteAllocation(alloc.id)}
-                                    class="btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                    disabled={!!alloc.containerId}
-                                    title={alloc.containerId ? 'Cannot delete allocation in use' : 'Delete allocation'}
-                                >
-                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                    </svg>
-                                    Delete
-                                </button>
+                                <div class="flex items-center justify-end gap-2">
+                                    <button
+                                        on:click={() => openEditModal(alloc)}
+                                        class="btn-ghost btn-sm text-dark-400 hover:text-white hover:bg-dark-700"
+                                        title="Edit allocation"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                        </svg>
+                                        Edit
+                                    </button>
+                                    <button
+                                        on:click={() => deleteAllocation(alloc.id)}
+                                        class="btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                        disabled={!!alloc.containerId}
+                                        title={alloc.containerId ? 'Cannot delete allocation in use' : 'Delete allocation'}
+                                    >
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                        </svg>
+                                        Delete
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     {:else}

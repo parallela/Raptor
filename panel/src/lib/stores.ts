@@ -25,7 +25,6 @@ user.subscribe((value) => {
     }
 });
 
-// Permission helpers
 export const isAdmin = derived(user, ($user) => {
     if (!$user) return false;
     return $user.roleName === 'admin' || $user.permissions?.['*'] === true;
@@ -36,7 +35,6 @@ export const isManager = derived(user, ($user) => {
     return $user.roleName === 'manager' || $user.roleName === 'admin' || $user.permissions?.['*'] === true;
 });
 
-// Check if user can create containers
 export const canCreateContainers = derived(user, ($user) => {
     if (!$user) return false;
     if ($user.permissions?.['*'] === true) return true;
@@ -44,7 +42,6 @@ export const canCreateContainers = derived(user, ($user) => {
     return $user.permissions?.['containers.create'] === true;
 });
 
-// Check if user can view daemons page
 export const canViewDaemons = derived(user, ($user) => {
     if (!$user) return false;
     if ($user.permissions?.['*'] === true) return true;

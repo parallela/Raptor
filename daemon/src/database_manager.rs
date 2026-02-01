@@ -76,14 +76,12 @@ impl DatabaseManager {
         }
     }
 
-    /// Get the path to the database servers state file
     fn get_state_file_path() -> PathBuf {
         let data_dir = std::env::var("DAEMON_DATA_DIR")
             .unwrap_or_else(|_| "/var/lib/raptor-daemon".to_string());
         PathBuf::from(data_dir).join("database_servers.json")
     }
 
-    /// Load database servers state from disk
     pub async fn load_state(&self) {
         let state_file = Self::get_state_file_path();
         match tokio::fs::read_to_string(&state_file).await {
@@ -108,7 +106,6 @@ impl DatabaseManager {
         }
     }
 
-    /// Save database servers state to disk
     pub async fn save_state(&self) {
         let state_file = Self::get_state_file_path();
         let servers: Vec<DatabaseServer> = self.servers.iter().map(|r| r.value().clone()).collect();
@@ -178,7 +175,6 @@ pub async fn create_and_start_database_container(
 ) -> Result<String, String> {
     let docker = get_docker().await?;
 
-    // First, check if container exists by ID
     if let Some(container_id) = &server.container_id {
         match docker.inspect_container(container_id, None).await {
             Ok(info) => {
@@ -188,19 +184,18 @@ pub async fn create_and_start_database_container(
                         return Ok(container_id.clone());
                     }
                 }
-                // Container exists but not running - start it
+
                 tracing::info!("Starting existing container {}", container_id);
                 docker.start_container::<String>(container_id, None).await
                     .map_err(|e| format!("Failed to start container: {}", e))?;
                 return Ok(container_id.clone());
             }
             Err(_) => {
-                // Container ID not found, will check by name below
+
             }
         }
     }
 
-    // Check if container exists by name
     match docker.inspect_container(&server.container_name, None).await {
         Ok(info) => {
             let container_id = info.id.unwrap_or_default();
@@ -210,19 +205,17 @@ pub async fn create_and_start_database_container(
                     return Ok(container_id);
                 }
             }
-            // Container exists but not running - start it
+
             tracing::info!("Starting existing container {} (found by name)", server.container_name);
             docker.start_container::<String>(&container_id, None).await
                 .map_err(|e| format!("Failed to start container: {}", e))?;
             return Ok(container_id);
         }
         Err(_) => {
-            // Container doesn't exist by name either, will create new one
             tracing::info!("Container {} not found, creating new one", server.container_name);
         }
     }
 
-    // Configure container based on database type
     let (image, env_vars, internal_port, cmd) = match server.db_type.as_str() {
         "postgresql" => (
             "postgres:16-alpine",
@@ -256,7 +249,6 @@ pub async fn create_and_start_database_container(
         _ => return Err("Invalid database type".to_string()),
     };
 
-    // Pull image
     tracing::info!("Pulling database image: {}", image);
     let mut pull_stream = docker.create_image(
         Some(CreateImageOptions {
@@ -273,17 +265,15 @@ pub async fn create_and_start_database_container(
         }
     }
 
-    // Create volume directory for persistence
     let data_dir = std::env::var("DAEMON_DATA_DIR")
         .unwrap_or_else(|_| "/var/lib/raptor-daemon".to_string());
     let volume_path = format!("{}/database_volumes/{}", data_dir, server.container_name);
     tokio::fs::create_dir_all(&volume_path).await
         .map_err(|e| format!("Failed to create volume directory: {}", e))?;
 
-    // For Redis, create ACL file that disables default user and sets up admin
     if server.db_type == "redis" {
         let acl_path = format!("{}/users.acl", volume_path);
-        // Disable default user (no anonymous access) and create admin user with root password
+
         let acl_content = format!(
             "user default off\nuser admin on >{} ~* +@all\n",
             server.root_password
@@ -318,14 +308,13 @@ pub async fn create_and_start_database_container(
                 name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
                 ..Default::default()
             }),
-            memory: Some(1024 * 1024 * 1024), // 1GB TODO: maybe move memory for the databases to config
+            memory: Some(1024 * 1024 * 1024),
             network_mode: Some(RAPTOR_NETWORK.to_string()),
             ..Default::default()
         }),
         ..Default::default()
     };
 
-    // Create container
     let container = docker
         .create_container::<String, String>(
             Some(CreateContainerOptions {
@@ -337,7 +326,6 @@ pub async fn create_and_start_database_container(
         .await
         .map_err(|e| format!("Failed to create container: {}", e))?;
 
-    // Start container
     docker
         .start_container::<String>(&container.id, None)
         .await
@@ -345,7 +333,6 @@ pub async fn create_and_start_database_container(
 
     tracing::info!("Created and started database container: {} ({})", server.container_name, container.id);
 
-    // Wait for database to be ready
     tracing::info!("Waiting for {} to be ready...", server.db_type);
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
@@ -355,7 +342,6 @@ pub async fn create_and_start_database_container(
 pub async fn stop_database_container(server: &DatabaseServer) -> Result<(), String> {
     let docker = get_docker().await?;
 
-    // Try to stop by container_id first
     if let Some(container_id) = &server.container_id {
         match docker.stop_container(container_id, Some(StopContainerOptions { t: 30 })).await {
             Ok(_) => {
@@ -368,14 +354,12 @@ pub async fn stop_database_container(server: &DatabaseServer) -> Result<(), Stri
         }
     }
 
-    // Try to stop by name
     match docker.stop_container(&server.container_name, Some(StopContainerOptions { t: 30 })).await {
         Ok(_) => {
             tracing::info!("Stopped container by name: {}", server.container_name);
             Ok(())
         }
         Err(e) => {
-            // Check if container is already stopped or doesn't exist
             if let Ok(info) = docker.inspect_container(&server.container_name, None).await {
                 if let Some(state) = info.state {
                     if !state.running.unwrap_or(false) {
@@ -392,15 +376,12 @@ pub async fn stop_database_container(server: &DatabaseServer) -> Result<(), Stri
 pub async fn delete_database_container(server: &DatabaseServer) -> Result<(), String> {
     let docker = get_docker().await?;
 
-    // Determine which identifier to use
     let container_ref = server.container_id.as_ref()
         .map(|s| s.as_str())
         .unwrap_or(&server.container_name);
 
-    // Stop first (ignore errors)
     let _ = docker.stop_container(container_ref, Some(StopContainerOptions { t: 10 })).await;
 
-    // Remove
     docker
         .remove_container(container_ref, None)
         .await
@@ -416,7 +397,6 @@ pub async fn execute_db_command(
 ) -> Result<String, String> {
     let docker = get_docker().await?;
 
-    // Use container_id if available, otherwise use container_name
     let container_ref = server.container_id.as_ref()
         .map(|s| s.as_str())
         .unwrap_or(&server.container_name);
@@ -438,7 +418,7 @@ pub async fn execute_db_command(
             command.to_string(),
         ],
         "redis" => {
-            // Authenticate as admin user to run commands
+
             let mut args = vec![
                 "redis-cli".to_string(),
                 "--user".to_string(),
@@ -492,21 +472,19 @@ pub async fn create_user_database(
 ) -> Result<(), String> {
     match server.db_type.as_str() {
         "postgresql" => {
-            // Create user (quote identifier with double quotes for PostgreSQL)
+
             let create_user_cmd = format!(
                 "CREATE USER \"{}\" WITH PASSWORD '{}';",
                 db_user, db_password
             );
             execute_db_command(server, &create_user_cmd).await?;
 
-            // Create database (quote identifiers)
             let create_db_cmd = format!(
                 "CREATE DATABASE \"{}\" OWNER \"{}\";",
                 db_name, db_user
             );
             execute_db_command(server, &create_db_cmd).await?;
 
-            // Grant privileges (quote identifiers)
             let grant_cmd = format!(
                 "GRANT ALL PRIVILEGES ON DATABASE \"{}\" TO \"{}\";",
                 db_name, db_user
@@ -514,11 +492,10 @@ pub async fn create_user_database(
             execute_db_command(server, &grant_cmd).await?;
         }
         "mysql" => {
-            // Create database (backticks for MySQL)
+
             let create_db_cmd = format!("CREATE DATABASE `{}`;", db_name);
             execute_db_command(server, &create_db_cmd).await?;
 
-            // Create user and grant privileges
             let create_user_cmd = format!(
                 "CREATE USER '{}'@'%' IDENTIFIED BY '{}';",
                 db_user, db_password
@@ -540,7 +517,6 @@ pub async fn create_user_database(
             );
             execute_db_command(server, &acl_cmd).await?;
 
-            // Save ACL to file
             execute_db_command(server, "ACL SAVE").await?;
 
             tracing::info!("Created Redis user {} with access to keys prefixed with {}:", db_user, db_name);
@@ -605,7 +581,7 @@ pub async fn reset_user_database_password(
             execute_db_command(server, "FLUSH PRIVILEGES;").await?;
         }
         "redis" => {
-            // Update password while keeping key prefix isolation
+
             let acl_cmd = format!(
                 "ACL SETUSER {} on >{} resetkeys ~{}:* +@all",
                 db_user, new_password, db_name

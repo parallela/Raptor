@@ -36,7 +36,6 @@
         userId: ''
     };
 
-
     onMount(async () => {
         if (!$user) {
             goto('/login');
@@ -70,15 +69,12 @@
         }
         try {
             selectedFlake = await api.getFlake(flakeId);
-            // Initialize variables with defaults
             flakeVariables = {};
             if (selectedFlake) {
                 for (const v of selectedFlake.variables) {
                     flakeVariables[v.envVariable] = v.defaultValue || '';
                 }
-                // Set SERVER_MEMORY from server memory (JVM heap)
                 flakeVariables['SERVER_MEMORY'] = String(newContainer.serverMemory);
-                // Pre-fill startup command from flake
                 newContainer.startupScript = selectedFlake.startupCommand;
             }
         } catch (e: any) {
@@ -89,7 +85,6 @@
     async function createContainer() {
         creating = true;
         try {
-            // Validate required fields
             if (!newContainer.allocationId) {
                 toast.error('Please select a network allocation');
                 creating = false;
@@ -108,12 +103,10 @@
                 startupScript: newContainer.startupScript || undefined
             };
 
-            // If flake selected, use flake_id and variables
             if (newContainer.flakeId && selectedFlake) {
                 payload.flakeId = newContainer.flakeId;
                 payload.variables = flakeVariables;
             } else {
-                // Manual mode - require image
                 payload.image = newContainer.image;
             }
 
@@ -132,7 +125,6 @@
         }
     }
 
-    // Delete confirmation state
     let deleteTarget: { id: string; name: string } | null = null;
     let deleteStep = 0;
     let deleteConfirmName = '';
@@ -158,7 +150,6 @@
             return;
         }
 
-        // Final step - verify name matches
         if (deleteConfirmName !== deleteTarget.name) {
             toast.error('Server name does not match');
             return;
@@ -185,7 +176,6 @@
         }
     }
 
-    // Allocations for create modal (fetched when daemon is selected)
     let availableAllocations: { id: string; ip: string; port: number }[] = [];
     let loadingAllocations = false;
 
@@ -197,7 +187,6 @@
         loadingAllocations = true;
         try {
             const allAllocations = await api.listAllocations();
-            // Filter to only show allocations for this daemon that aren't assigned
             availableAllocations = allAllocations.filter(a => a.daemonId === daemonId);
         } catch (e) {
             console.error('Failed to load allocations:', e);
@@ -207,7 +196,6 @@
         }
     }
 
-    // Watch for daemon selection changes
     $: if (newContainer.daemonId) {
         loadAvailableAllocations(newContainer.daemonId);
     }
@@ -392,7 +380,6 @@
                             <input type="number" id="disk" bind:value={newContainer.diskLimit} class="input" min="512" step="512" required />
                         </div>
                     </div>
-
 
                     <div class="input-group">
                         <label for="allocation" class="input-label">

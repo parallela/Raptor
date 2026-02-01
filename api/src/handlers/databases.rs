@@ -14,8 +14,6 @@ use crate::{
     },
 };
 
-/// Create HTTP client for daemon communication
-/// Accepts self-signed certificates for internal daemon communication
 fn daemon_client() -> reqwest::Client {
     reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -24,9 +22,6 @@ fn daemon_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-// ============ User Database Handlers ============
-
-/// List all databases for the current user
 pub async fn list_databases(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -62,20 +57,18 @@ pub async fn list_databases(
     Ok(Json(databases))
 }
 
-/// Create a new database for the current user
 pub async fn create_database(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Json(payload): Json<CreateDatabaseRequest>,
 ) -> AppResult<Json<UserDatabaseResponse>> {
-    // Validate db_type
+
     if !["postgresql", "mysql", "redis"].contains(&payload.db_type.as_str()) {
         return Err(AppError::BadRequest(
             "Invalid database type. Must be 'postgresql', 'mysql', or 'redis'".to_string(),
         ));
     }
 
-    // Find an active database server for this type
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE db_type = $1 AND status = 'running' LIMIT 1"#
     )
@@ -89,7 +82,6 @@ pub async fn create_database(
         ))
     })?;
 
-    // Get the daemon for this server
     let daemon: Daemon = sqlx::query_as(
         r#"SELECT * FROM daemons WHERE id = $1"#
     )
@@ -98,7 +90,6 @@ pub async fn create_database(
     .await?
     .ok_or_else(|| AppError::Internal("Database server has no daemon assigned".to_string()))?;
 
-    // Generate database name if not provided (alphanumeric only, no hyphens)
     let db_name = payload.db_name.unwrap_or_else(|| {
         format!(
             "db_{}_{}",
@@ -107,11 +98,9 @@ pub async fn create_database(
         )
     });
 
-    // Generate random username and password (alphanumeric only, no hyphens for SQL compatibility)
     let db_user = format!("u_{}", &Uuid::new_v4().to_string().replace("-", "")[..12]);
     let db_password = generate_password(24);
 
-    // Call daemon to create the database
     let client = daemon_client();
     let daemon_url = format!("{}/database-servers/{}/databases", daemon.base_url(), server.id);
 
@@ -136,7 +125,6 @@ pub async fn create_database(
         return Err(AppError::Daemon(format!("Failed to create database: {}", error_text)));
     }
 
-    // Create the user_database record
     let id = Uuid::new_v4();
     let database: UserDatabase = sqlx::query_as(
         r#"
@@ -155,7 +143,6 @@ pub async fn create_database(
     .fetch_one(&state.db)
     .await?;
 
-    // Build response
     let connection_string = build_connection_string(
         &database.db_type,
         &database.db_user,
@@ -179,15 +166,13 @@ pub async fn create_database(
     }))
 }
 
-/// Get available database types (servers that are running)
 pub async fn get_available_database_types(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
 ) -> AppResult<Json<Vec<serde_json::Value>>> {
-    // Get all possible database types
+
     let all_types = vec!["postgresql", "mysql", "redis"];
 
-    // Get running database types
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"SELECT DISTINCT db_type FROM database_servers WHERE status = 'running'"#
     )
@@ -196,7 +181,6 @@ pub async fn get_available_database_types(
 
     let running_types: Vec<String> = rows.into_iter().map(|(t,)| t).collect();
 
-    // Build response with availability info
     let result: Vec<serde_json::Value> = all_types
         .iter()
         .map(|t| {
@@ -217,7 +201,6 @@ pub async fn get_available_database_types(
     Ok(Json(result))
 }
 
-/// Get a specific database by ID
 pub async fn get_database(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -255,13 +238,12 @@ pub async fn get_database(
     Ok(Json(database))
 }
 
-/// Delete a database
 pub async fn delete_database(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    // Verify ownership and get database info
+
     let database: UserDatabase = sqlx::query_as(
         r#"SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"#
     )
@@ -271,7 +253,6 @@ pub async fn delete_database(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Get server and daemon info
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -287,7 +268,6 @@ pub async fn delete_database(
         .fetch_optional(&state.db)
         .await?;
 
-        // Call daemon to delete the database
         if let Some(daemon) = daemon {
             let client = daemon_client();
             let daemon_url = format!("{}/database-servers/{}/databases", daemon.base_url(), server.id);
@@ -312,7 +292,6 @@ pub async fn delete_database(
         }
     }
 
-    // Delete from database
     sqlx::query("DELETE FROM user_databases WHERE id = $1")
         .bind(database.id)
         .execute(&state.db)
@@ -321,13 +300,12 @@ pub async fn delete_database(
     Ok(Json(serde_json::json!({ "message": "Database deleted" })))
 }
 
-/// Reset database password
 pub async fn reset_database_password(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<UserDatabaseResponse>> {
-    // Verify ownership
+
     let database: UserDatabase = sqlx::query_as(
         r#"SELECT * FROM user_databases WHERE id = $1 AND user_id = $2"#
     )
@@ -337,7 +315,6 @@ pub async fn reset_database_password(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Get server info
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -345,10 +322,8 @@ pub async fn reset_database_password(
     .fetch_one(&state.db)
     .await?;
 
-    // Generate new password
     let new_password = generate_password(24);
 
-    // Call daemon to reset password if server is running
     if server.status == "running" {
         if let Some(daemon_id) = server.daemon_id {
             let daemon: Option<Daemon> = sqlx::query_as(
@@ -386,7 +361,6 @@ pub async fn reset_database_password(
         }
     }
 
-    // Update the password in API database
     let updated: UserDatabase = sqlx::query_as(
         r#"
         UPDATE user_databases
@@ -423,9 +397,6 @@ pub async fn reset_database_password(
     }))
 }
 
-// ============ Admin Database Server Handlers ============
-
-/// List all database servers (admin only)
 pub async fn list_database_servers(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
@@ -455,20 +426,18 @@ pub async fn list_database_servers(
     Ok(Json(servers))
 }
 
-/// Create a new database server (admin only)
 pub async fn create_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Json(payload): Json<CreateDatabaseServerRequest>,
 ) -> AppResult<Json<DatabaseServerAdminResponse>> {
-    // Validate db_type
+
     if !["postgresql", "mysql", "redis"].contains(&payload.db_type.as_str()) {
         return Err(AppError::BadRequest(
             "Invalid database type. Must be 'postgresql', 'mysql', or 'redis'".to_string(),
         ));
     }
 
-    // Verify daemon exists
     let daemon: Daemon = sqlx::query_as(
         r#"SELECT * FROM daemons WHERE id = $1"#
     )
@@ -477,20 +446,16 @@ pub async fn create_database_server(
     .await?
     .ok_or_else(|| AppError::BadRequest("Daemon not found".to_string()))?;
 
-    // Generate container name if not provided
     let container_name = payload.container_name.unwrap_or_else(|| {
         format!("raptor-{}-{}", payload.db_type, &Uuid::new_v4().to_string()[..8])
     });
 
-    // Generate root password
     let root_password = generate_password(32);
 
-    // Use daemon's host as the database host (where users will connect to)
     let db_host = daemon.host.clone();
 
     let id = Uuid::new_v4();
 
-    // Create the server in daemon
     let client = daemon_client();
     let daemon_url = format!("{}/database-servers", daemon.base_url());
 
@@ -516,7 +481,6 @@ pub async fn create_database_server(
         return Err(AppError::Daemon(format!("Failed to create database server: {}", error_text)));
     }
 
-    // Save to API database
     let server: DatabaseServer = sqlx::query_as(
         r#"
         INSERT INTO database_servers (id, daemon_id, db_type, container_name, host, port, root_password, status)
@@ -550,7 +514,6 @@ pub async fn create_database_server(
     }))
 }
 
-/// Get a specific database server (admin only)
 pub async fn get_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
@@ -583,14 +546,13 @@ pub async fn get_database_server(
     Ok(Json(server))
 }
 
-/// Update a database server (admin only)
 pub async fn update_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateDatabaseServerRequest>,
 ) -> AppResult<Json<DatabaseServerAdminResponse>> {
-    // Check if server exists
+
     let existing: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -645,13 +607,12 @@ pub async fn update_database_server(
     }))
 }
 
-/// Delete a database server (admin only)
 pub async fn delete_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    // Check if server has databases
+
     let count: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*) FROM user_databases WHERE server_id = $1"#
     )
@@ -666,7 +627,6 @@ pub async fn delete_database_server(
         )));
     }
 
-    // Get server to find daemon
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -675,7 +635,6 @@ pub async fn delete_database_server(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Delete from daemon
     if let Some(daemon_id) = server.daemon_id {
         let daemon: Option<Daemon> = sqlx::query_as(
             r#"SELECT * FROM daemons WHERE id = $1"#
@@ -712,13 +671,12 @@ pub async fn delete_database_server(
     Ok(Json(serde_json::json!({ "message": "Database server deleted" })))
 }
 
-/// Start a database server (admin only)
 pub async fn start_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<DatabaseServerAdminResponse>> {
-    // Get the server
+
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -727,7 +685,6 @@ pub async fn start_database_server(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Get daemon
     let daemon: Daemon = sqlx::query_as(
         r#"SELECT * FROM daemons WHERE id = $1"#
     )
@@ -738,8 +695,6 @@ pub async fn start_database_server(
 
     let client = daemon_client();
 
-    // First, ensure the server exists in the daemon by trying to create it
-    // (the daemon will handle if it already exists)
     let create_url = format!("{}/database-servers", daemon.base_url());
     let create_req = serde_json::json!({
         "id": server.id.to_string(),
@@ -750,7 +705,6 @@ pub async fn start_database_server(
         "rootPassword": server.root_password
     });
 
-    // Try to create - ignore errors if already exists
     let _ = client
         .post(&create_url)
         .header("X-API-Key", &daemon.api_key)
@@ -758,7 +712,6 @@ pub async fn start_database_server(
         .send()
         .await;
 
-    // Now call daemon to start the container
     let daemon_url = format!("{}/database-servers/{}/start", daemon.base_url(), id);
 
     let res = client
@@ -773,7 +726,6 @@ pub async fn start_database_server(
         return Err(AppError::Daemon(format!("Failed to start database server: {}", error_text)));
     }
 
-    // Get updated server info from daemon response
     let daemon_response: serde_json::Value = res.json().await
         .map_err(|e| AppError::Daemon(format!("Failed to parse daemon response: {}", e)))?;
 
@@ -781,7 +733,6 @@ pub async fn start_database_server(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // Update status in API database
     let updated: DatabaseServer = sqlx::query_as(
         r#"
         UPDATE database_servers
@@ -818,13 +769,12 @@ pub async fn start_database_server(
     }))
 }
 
-/// Stop a database server (admin only)
 pub async fn stop_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<DatabaseServerAdminResponse>> {
-    // Get the server
+
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -833,7 +783,6 @@ pub async fn stop_database_server(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Get daemon
     let daemon: Daemon = sqlx::query_as(
         r#"SELECT * FROM daemons WHERE id = $1"#
     )
@@ -844,7 +793,6 @@ pub async fn stop_database_server(
 
     let client = daemon_client();
 
-    // First, ensure the server exists in the daemon by trying to create it
     let create_url = format!("{}/database-servers", daemon.base_url());
     let create_req = serde_json::json!({
         "id": server.id.to_string(),
@@ -855,7 +803,6 @@ pub async fn stop_database_server(
         "rootPassword": server.root_password
     });
 
-    // Try to create - ignore errors if already exists
     let _ = client
         .post(&create_url)
         .header("X-API-Key", &daemon.api_key)
@@ -863,7 +810,6 @@ pub async fn stop_database_server(
         .send()
         .await;
 
-    // Call daemon to stop the container
     let daemon_url = format!("{}/database-servers/{}/stop", daemon.base_url(), id);
 
     let res = client
@@ -878,7 +824,6 @@ pub async fn stop_database_server(
         return Err(AppError::Daemon(format!("Failed to stop database server: {}", error_text)));
     }
 
-    // Update status in API database
     let updated: DatabaseServer = sqlx::query_as(
         r#"
         UPDATE database_servers
@@ -914,13 +859,12 @@ pub async fn stop_database_server(
     }))
 }
 
-/// Restart a database server (admin only)
 pub async fn restart_database_server(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<DatabaseServerAdminResponse>> {
-    // Get the server
+
     let server: DatabaseServer = sqlx::query_as(
         r#"SELECT * FROM database_servers WHERE id = $1"#
     )
@@ -929,7 +873,6 @@ pub async fn restart_database_server(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Get daemon
     let daemon: Daemon = sqlx::query_as(
         r#"SELECT * FROM daemons WHERE id = $1"#
     )
@@ -938,7 +881,6 @@ pub async fn restart_database_server(
     .await?
     .ok_or_else(|| AppError::BadRequest("Database server has no daemon assigned".to_string()))?;
 
-    // Update status to restarting
     sqlx::query(
         r#"UPDATE database_servers SET status = 'restarting', updated_at = NOW() WHERE id = $1"#
     )
@@ -948,7 +890,6 @@ pub async fn restart_database_server(
 
     let client = daemon_client();
 
-    // First, ensure the server exists in the daemon by trying to create it
     let create_url = format!("{}/database-servers", daemon.base_url());
     let create_req = serde_json::json!({
         "id": server.id.to_string(),
@@ -959,7 +900,6 @@ pub async fn restart_database_server(
         "rootPassword": server.root_password
     });
 
-    // Try to create - ignore errors if already exists
     let _ = client
         .post(&create_url)
         .header("X-API-Key", &daemon.api_key)
@@ -967,7 +907,6 @@ pub async fn restart_database_server(
         .send()
         .await;
 
-    // Call daemon to restart the container
     let daemon_url = format!("{}/database-servers/{}/restart", daemon.base_url(), id);
 
     let res = client
@@ -979,7 +918,7 @@ pub async fn restart_database_server(
 
     if !res.status().is_success() {
         let error_text = res.text().await.unwrap_or_default();
-        // Revert status on failure
+
         sqlx::query(
             r#"UPDATE database_servers SET status = 'error', updated_at = NOW() WHERE id = $1"#
         )
@@ -989,7 +928,6 @@ pub async fn restart_database_server(
         return Err(AppError::Daemon(format!("Failed to restart database server: {}", error_text)));
     }
 
-    // Get updated server info from daemon response
     let daemon_response: serde_json::Value = res.json().await
         .map_err(|e| AppError::Daemon(format!("Failed to parse daemon response: {}", e)))?;
 
@@ -997,7 +935,6 @@ pub async fn restart_database_server(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // Update status in API database
     let updated: DatabaseServer = sqlx::query_as(
         r#"
         UPDATE database_servers
@@ -1034,8 +971,6 @@ pub async fn restart_database_server(
     }))
 }
 
-// ============ Helper Functions ============
-
 fn generate_password(length: usize) -> String {
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let mut rng = rand::thread_rng();
@@ -1064,8 +999,7 @@ fn build_connection_string(
             "mysql://{}:{}@{}:{}/{}",
             db_user, db_password, host, port, db_name
         ),
-        // Redis uses ACL with key prefix isolation: all keys must be prefixed with "db_name:"
-        // Connection: redis://username:password@host:port
+
         "redis" => format!("redis://{}:{}@{}:{}", db_user, db_password, host, port),
         _ => String::new(),
     }

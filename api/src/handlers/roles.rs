@@ -104,7 +104,6 @@ pub async fn delete_role(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<()>> {
-    // Don't allow deleting built-in roles
     let builtin_ids = [
         "00000000-0000-0000-0000-000000000001",
         "00000000-0000-0000-0000-000000000002",

@@ -15,7 +15,6 @@
     let creating = false;
     let error = '';
 
-    // Server configuration
     let newServer = {
         name: '',
         daemonId: '',
@@ -23,7 +22,6 @@
         startupScript: '',
         allocationId: '',
         userId: '',
-        // Resource limits
         memoryLimit: 1280,
         serverMemory: 1024,
         cpuLimit: 1,
@@ -32,7 +30,6 @@
         ioWeight: 500,
     };
 
-    // Presets for common server types
     const presets = [
         { name: 'Minecraft (Basic)', image: 'itzg/minecraft-server', memory: 2048, cpu: 1, disk: 10240 },
         { name: 'Minecraft (Performance)', image: 'itzg/minecraft-server', memory: 4096, cpu: 2, disk: 20480 },
@@ -71,7 +68,7 @@
     function applyPreset(preset: typeof presets[0]) {
         newServer.image = preset.image;
         newServer.serverMemory = preset.memory;
-        newServer.memoryLimit = Math.round(preset.memory * 1.25); // 25% overhead for container
+        newServer.memoryLimit = Math.round(preset.memory * 1.25);
         newServer.cpuLimit = preset.cpu;
         newServer.diskLimit = preset.disk;
     }
@@ -80,7 +77,6 @@
         error = '';
         creating = true;
         try {
-            // Validate required allocation
             if (!newServer.allocationId) {
                 error = 'Please select a network allocation';
                 toast.error(error);

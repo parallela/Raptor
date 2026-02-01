@@ -6,7 +6,6 @@
     $: containerId = $page.params.id;
 
     onMount(() => {
-        // Redirect to console tab by default
         goto(`/containers/${containerId}/console`, { replaceState: true });
     });
 </script>

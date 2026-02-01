@@ -68,5 +68,3 @@ pub async fn require_manager(req: Request<Body>, next: Next) -> Response {
     }
 }
 
-
-

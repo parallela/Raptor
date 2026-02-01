@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::config::Config;
 
-/// Generate a random password
 fn generate_password(length: usize) -> String {
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();
@@ -230,7 +229,7 @@ async fn seed_admin_user(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
 }
 
 async fn seed_database_server_passwords(pool: &PgPool) -> anyhow::Result<()> {
-    // Update any database servers that still have placeholder passwords
+
     let servers: Vec<(Uuid, String)> = sqlx::query_as(
         "SELECT id, root_password FROM database_servers WHERE root_password LIKE 'CHANGE_ME%'"
     )
@@ -253,7 +252,7 @@ async fn seed_database_server_passwords(pool: &PgPool) -> anyhow::Result<()> {
 }
 
 async fn seed_default_database_servers(pool: &PgPool) -> anyhow::Result<()> {
-    // Get the first daemon to assign the database servers to (including its host)
+
     let daemon: Option<(Uuid, String)> = sqlx::query_as("SELECT id, host FROM daemons LIMIT 1")
         .fetch_optional(pool)
         .await?;
@@ -266,10 +265,6 @@ async fn seed_default_database_servers(pool: &PgPool) -> anyhow::Result<()> {
         }
     };
 
-    // Default database servers with specific ports:
-    // Redis: 63791 (6379 + 1 at end = 63791)
-    // PostgreSQL: 54321 (5432 + 1 at end = 54321)
-    // MySQL: 33061 (3306 + 1 at end = 33061)
     let default_servers = [
         ("redis", "raptor-redis-default", 63791),
         ("postgresql", "raptor-postgresql-default", 54321),
@@ -277,7 +272,7 @@ async fn seed_default_database_servers(pool: &PgPool) -> anyhow::Result<()> {
     ];
 
     for (db_type, container_name, port) in default_servers {
-        // Check if a server of this type already exists
+
         let existing: Option<(Uuid,)> = sqlx::query_as(
             "SELECT id FROM database_servers WHERE db_type = $1 AND container_name = $2"
         )

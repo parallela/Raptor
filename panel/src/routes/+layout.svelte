@@ -13,7 +13,6 @@
 
     $: currentPath = $page.url.pathname;
 
-    // Filter nav items based on user permissions
     $: navItems = [
         { href: '/', label: 'Dashboard', icon: 'dashboard', show: true },
         { href: '/containers', label: 'Containers', icon: 'containers', show: true },
@@ -22,7 +21,6 @@
         { href: '/admin', label: 'Admin', icon: 'admin', show: $isAdmin || $isManager },
     ].filter(item => item.show);
 
-    // Get display role name
     $: roleName = $user?.roleName
         ? $user.roleName.charAt(0).toUpperCase() + $user.roleName.slice(1)
         : 'User';

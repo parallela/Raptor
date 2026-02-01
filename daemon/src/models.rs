@@ -7,9 +7,6 @@ use crate::database_manager::DatabaseManager;
 use crate::docker::DockerManager;
 use crate::ftp::FtpServerState;
 
-/// Per-container locking mechanism to prevent concurrent operations on the same container.
-/// This ensures that only one start/stop/restart/recreate operation can happen
-/// on a given container at a time, preventing race conditions and deadlocks.
 pub struct ContainerLocks {
     locks: DashMap<String, Arc<Mutex<()>>>,
 }
@@ -21,8 +18,6 @@ impl ContainerLocks {
         }
     }
 
-    /// Get or create a lock for a specific container.
-    /// The lock is cloned (Arc) so it can be held across await points safely.
     pub fn get_lock(&self, container_id: &str) -> Arc<Mutex<()>> {
         self.locks
             .entry(container_id.to_string())
@@ -30,7 +25,6 @@ impl ContainerLocks {
             .clone()
     }
 
-    /// Remove a lock when a container is deleted (optional cleanup)
     pub fn remove_lock(&self, container_id: &str) {
         self.locks.remove(container_id);
     }
@@ -47,9 +41,7 @@ pub struct AppState {
     pub api_key: String,
     pub containers: DashMap<String, ManagedContainer>,
     pub ftp_state: Arc<FtpServerState>,
-    /// Per-container locks to serialize container operations
     pub container_locks: ContainerLocks,
-    /// Database manager for PostgreSQL, MySQL, Redis servers
     pub database_manager: DatabaseManager,
 }
 
@@ -60,31 +52,20 @@ pub struct ManagedContainer {
     pub docker_id: String,
     pub image: String,
     pub startup_script: Option<String>,
-    /// Command to execute for graceful stop (e.g., "stop" for Minecraft)
     pub stop_command: Option<String>,
-    /// Legacy single allocation (kept for backward compatibility during migration)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allocation: Option<AllocationInfo>,
-    /// Container allocations (port bindings)
     #[serde(default)]
     pub allocations: Vec<ContainerAllocation>,
     pub resources: ContainerResources,
-    /// Install script from flake (runs on first start)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub install_script: Option<String>,
-    /// Whether the install script has been run
     #[serde(default)]
     pub installed: bool,
-    /// Environment variables for install/startup
     #[serde(default)]
     pub environment: std::collections::HashMap<String, String>,
-    /// Restart policy: "no", "always", "on-failure", "unless-stopped"
-    /// Default is "unless-stopped" for game servers (restarts when user types stop in console)
-    /// Use "no" or "on-failure" for services that shouldn't restart on manual stop
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
-    /// Whether to allocate a TTY for the container (needed for interactive programs)
-    /// Default is false for cleaner logs
     #[serde(default)]
     pub tty: bool,
 }
@@ -93,7 +74,6 @@ fn default_restart_policy() -> String {
     "unless-stopped".to_string()
 }
 
-/// Container allocation with full details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContainerAllocation {
@@ -109,9 +89,7 @@ pub struct ContainerAllocation {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ContainerResources {
-    /// Docker container memory limit in MB (should be higher than server_memory to allow for JVM overhead)
     pub memory_limit: i64,
-    /// Server/JVM heap memory in MB (used for -Xmx in startup command via {{SERVER_MEMORY}})
     #[serde(default)]
     pub server_memory: i64,
     pub cpu_limit: f64,
@@ -151,19 +129,14 @@ pub struct CreateContainerRequest {
     pub name: String,
     pub image: String,
     pub startup_script: Option<String>,
-    /// Command to execute for graceful stop (e.g., "stop" for Minecraft)
     pub stop_command: Option<String>,
-    /// Legacy single allocation (kept for backward compatibility)
     pub allocation: Option<AllocationInfo>,
-    /// Multiple allocations support
     #[serde(default)]
     pub allocations: Vec<ContainerAllocation>,
     #[serde(default)]
     pub ports: Vec<PortMapping>,
-    /// Docker container memory limit in MB
     #[serde(default = "default_memory")]
     pub memory_limit: i64,
-    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
     #[serde(default)]
     pub server_memory: Option<i64>,
     #[serde(default = "default_cpu")]
@@ -174,15 +147,11 @@ pub struct CreateContainerRequest {
     pub swap_limit: i64,
     #[serde(default = "default_io")]
     pub io_weight: i32,
-    /// Install script to run when creating the container (from flake)
     pub install_script: Option<String>,
-    /// Environment variables for the container
     #[serde(default)]
     pub environment: std::collections::HashMap<String, String>,
-    /// Restart policy: "no", "always", "on-failure", "unless-stopped"
     #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
-    /// Whether to allocate a TTY (needed for interactive programs like Hytale)
     #[serde(default)]
     pub tty: bool,
 }
@@ -192,7 +161,6 @@ fn default_cpu() -> f64 { 1.0 }
 fn default_disk() -> i64 { 5120 }
 fn default_io() -> i32 { 500 }
 
-/// Helper to deserialize a value that might be a string or a number
 fn deserialize_string_or_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -233,7 +201,7 @@ where
         where
             E: de::Error,
         {
-            // Handle comma as decimal separator (European format)
+
             let normalized = v.replace(',', ".");
             normalized.parse::<f64>().map(Some).map_err(de::Error::custom)
         }
@@ -267,10 +235,8 @@ pub struct AssignAllocationRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateContainerRequest {
-    /// Docker container memory limit in MB
     #[serde(default)]
     pub memory_limit: Option<i64>,
-    /// Server/JVM heap memory in MB (used for -Xmx via {{SERVER_MEMORY}})
     #[serde(default)]
     pub server_memory: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_string_or_f64")]
@@ -281,10 +247,8 @@ pub struct UpdateContainerRequest {
     pub swap_limit: Option<i64>,
     #[serde(default)]
     pub io_weight: Option<i32>,
-    /// Legacy single allocation
     #[serde(default)]
     pub allocation: Option<AllocationInfo>,
-    /// Multiple allocations - if provided, replaces all allocations
     #[serde(default)]
     pub allocations: Option<Vec<ContainerAllocation>>,
     #[serde(default)]
@@ -297,7 +261,6 @@ pub struct AvailableAllocation {
     pub ip: String,
     pub ports: Vec<i32>,
 }
-
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

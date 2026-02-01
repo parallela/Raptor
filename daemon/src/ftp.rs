@@ -7,21 +7,17 @@ use libunftp::auth::{AuthenticationError, Authenticator, Credentials, UserDetail
 use libunftp::storage::{StorageBackend, Fileinfo, Metadata, Result as StorageResult, Error as StorageError, ErrorKind as StorageErrorKind};
 use tokio::io::AsyncSeekExt;
 
-/// Stored FTP credentials for a container - password is bcrypt hashed
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StoredFtpCredentials {
     pub username: String,
     pub password_hash: String,
 }
 
-/// All FTP credentials stored in a single file - keyed by container_id for O(1) lookup
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct FtpCredentialsStore {
-    /// Map of container_id -> credentials
     pub credentials: HashMap<String, StoredFtpCredentials>,
 }
 
-/// Custom user type that includes home directory info
 #[derive(Debug, Clone)]
 pub struct RaptorUser {
     pub username: String,
@@ -40,7 +36,6 @@ impl std::fmt::Display for RaptorUser {
     }
 }
 
-/// FTP user credentials stored in memory (includes plain password for current session)
 #[derive(Clone, Debug)]
 pub struct FtpUser {
     pub username: String,
@@ -50,14 +45,12 @@ pub struct FtpUser {
     pub is_admin: bool,
 }
 
-/// Get the secure path for FTP credentials storage
 fn get_ftp_credentials_path() -> PathBuf {
     let data_dir = std::env::var("DAEMON_DATA_DIR")
         .unwrap_or_else(|_| "/var/lib/raptor-daemon".to_string());
     PathBuf::from(data_dir).join("ftp_credentials.json")
 }
 
-/// FTP Server state
 #[derive(Debug)]
 pub struct FtpServerState {
     pub users: Arc<dashmap::DashMap<String, FtpUser>>,
@@ -71,13 +64,11 @@ impl FtpServerState {
             base_path: PathBuf::from(base_path),
         };
 
-        // Load persisted credentials on startup
         state.load_all_credentials();
 
         state
     }
 
-    /// Load all FTP credentials from secure storage file
     pub fn load_all_credentials(&self) {
         let creds_path = get_ftp_credentials_path();
 
@@ -108,11 +99,9 @@ impl FtpServerState {
         }
     }
 
-    /// Add user from stored credentials (password is already hashed)
     fn add_user_from_stored(&self, container_id: &str, creds: &StoredFtpCredentials) {
         let home_path = self.base_path.join("volumes").join(container_id);
 
-        // Create the home directory if it doesn't exist
         if let Err(e) = std::fs::create_dir_all(&home_path) {
             tracing::warn!("Failed to create FTP home directory {:?}: {}", home_path, e);
         }
@@ -131,11 +120,9 @@ impl FtpServerState {
         tracing::debug!("Loaded FTP user: {} for container: {}", creds.username, container_id);
     }
 
-    /// Save all FTP credentials to secure storage (HashMap keyed by container_id)
     fn save_all_credentials(&self) {
         let creds_path = get_ftp_credentials_path();
 
-        // Collect all users into HashMap keyed by container_id
         let mut credentials: HashMap<String, StoredFtpCredentials> = HashMap::new();
         for user in self.users.iter() {
             if !user.is_admin {
@@ -151,7 +138,6 @@ impl FtpServerState {
 
         let store = FtpCredentialsStore { credentials };
 
-        // Ensure parent directory exists
         if let Some(parent) = creds_path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 tracing::error!("Failed to create FTP credentials directory: {}", e);
@@ -161,10 +147,10 @@ impl FtpServerState {
 
         match serde_json::to_string_pretty(&store) {
             Ok(json) => {
-                // Write with restricted permissions (owner read/write only)
+
                 match std::fs::write(&creds_path, &json) {
                     Ok(_) => {
-                        // Try to set file permissions to 0600 (Unix only)
+
                         #[cfg(unix)]
                         {
                             use std::os::unix::fs::PermissionsExt;
@@ -179,17 +165,14 @@ impl FtpServerState {
         }
     }
 
-    /// Hash a password using bcrypt
     fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
         bcrypt::hash(password, bcrypt::DEFAULT_COST)
     }
 
-    /// Verify a password against a bcrypt hash
     fn verify_password(password: &str, hash: &str) -> bool {
         bcrypt::verify(password, hash).unwrap_or(false)
     }
 
-    /// Add a new FTP user with password hashing
     pub fn add_user(&self, username: &str, password: &str, container_id: &str) {
         let password_hash = match Self::hash_password(password) {
             Ok(hash) => hash,
@@ -201,7 +184,6 @@ impl FtpServerState {
 
         let home_path = self.base_path.join("volumes").join(container_id);
 
-        // Create the home directory if it doesn't exist
         if let Err(e) = std::fs::create_dir_all(&home_path) {
             tracing::warn!("Failed to create FTP home directory {:?}: {}", home_path, e);
         }
@@ -217,7 +199,6 @@ impl FtpServerState {
             },
         );
 
-        // Save all credentials to disk
         self.save_all_credentials();
 
         tracing::info!("Added FTP user: {} for container: {} (jailed, password hashed)", username, container_id);
@@ -234,7 +215,6 @@ impl FtpServerState {
 
         let home_path = self.base_path.join("volumes");
 
-        // Create the home directory if it doesn't exist
         if let Err(e) = std::fs::create_dir_all(&home_path) {
             tracing::warn!("Failed to create FTP admin home directory {:?}: {}", home_path, e);
         }
@@ -255,13 +235,12 @@ impl FtpServerState {
 
     pub fn remove_user(&self, username: &str) {
         if self.users.remove(username).is_some() {
-            // Save updated credentials to disk
+
             self.save_all_credentials();
             tracing::info!("Removed FTP user: {}", username);
         }
     }
 
-    /// Remove all users for a specific container
     pub fn remove_container_users(&self, container_id: &str) {
         let users_to_remove: Vec<String> = self.users
             .iter()
@@ -273,7 +252,6 @@ impl FtpServerState {
             self.users.remove(&username);
         }
 
-        // Save updated credentials to disk
         self.save_all_credentials();
         tracing::info!("Removed all FTP users for container: {}", container_id);
     }
@@ -282,7 +260,6 @@ impl FtpServerState {
         self.users.get(username).map(|u| u.clone())
     }
 
-    /// Verify user credentials using bcrypt
     pub fn verify_user(&self, username: &str, password: &str) -> Option<FtpUser> {
         if let Some(user) = self.users.get(username) {
             if Self::verify_password(password, &user.password_hash) {
@@ -293,7 +270,6 @@ impl FtpServerState {
     }
 }
 
-/// Custom authenticator that returns RaptorUser with home directory
 #[derive(Clone, Debug)]
 pub struct RaptorAuthenticator {
     state: Arc<FtpServerState>,
@@ -319,7 +295,6 @@ impl Authenticator<RaptorUser> for RaptorAuthenticator {
             None => return Err(AuthenticationError::BadPassword),
         };
 
-        // Use bcrypt verification
         if let Some(user) = self.state.verify_user(username, password) {
             tracing::info!("FTP auth success for user: {} (home: {:?})",
                 username, user.home_path);
@@ -334,13 +309,11 @@ impl Authenticator<RaptorUser> for RaptorAuthenticator {
     }
 }
 
-/// Custom storage backend that jails users to their home directory
 #[derive(Debug, Clone)]
 pub struct JailedFilesystem {
     base_path: PathBuf,
 }
 
-/// Wrapper for std::fs::Metadata that implements libunftp's Metadata trait
 #[derive(Debug)]
 pub struct FtpMetadata(std::fs::Metadata);
 
@@ -407,7 +380,6 @@ impl JailedFilesystem {
         Self { base_path }
     }
 
-    /// Resolve a path relative to user's home directory
     fn resolve_path(&self, user: &RaptorUser, path: &std::path::Path) -> PathBuf {
         let clean_path = path.to_string_lossy()
             .trim_start_matches('/')
@@ -449,7 +421,6 @@ impl StorageBackend<RaptorUser> for JailedFilesystem {
         let full_path = self.resolve_path(user, path.as_ref());
         tracing::debug!("FTP list: {:?} -> {:?}", path.as_ref(), full_path);
 
-        // Create directory if it doesn't exist
         if !full_path.exists() {
             tokio::fs::create_dir_all(&full_path).await.map_err(|e| {
                 StorageError::new(StorageErrorKind::PermanentFileNotAvailable, e)
@@ -512,7 +483,6 @@ impl StorageBackend<RaptorUser> for JailedFilesystem {
         let full_path = self.resolve_path(user, path.as_ref());
         tracing::debug!("FTP put: {:?} -> {:?}", path.as_ref(), full_path);
 
-        // Create parent directories if needed
         if let Some(parent) = full_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
                 StorageError::new(StorageErrorKind::PermanentFileNotAvailable, e)
@@ -604,7 +574,6 @@ impl StorageBackend<RaptorUser> for JailedFilesystem {
         let full_path = self.resolve_path(user, path.as_ref());
         tracing::debug!("FTP cwd: {:?} -> {:?}", path.as_ref(), full_path);
 
-        // Just verify the directory exists
         let meta = tokio::fs::metadata(&full_path).await.map_err(|e| {
             StorageError::new(StorageErrorKind::PermanentFileNotAvailable, e)
         })?;
@@ -620,20 +589,16 @@ impl StorageBackend<RaptorUser> for JailedFilesystem {
     }
 }
 
-/// Start the FTP server with jailed filesystem
 pub async fn start_ftp_server(state: Arc<FtpServerState>, addr: &str, port: u16) -> anyhow::Result<()> {
     let bind_addr = format!("{}:{}", addr, port);
     tracing::info!("Starting FTP server on {} (with per-user jailing)", bind_addr);
 
-    // Create base volumes directory
     let volumes_path = state.base_path.join("volumes");
     std::fs::create_dir_all(&volumes_path)?;
 
     let authenticator = Arc::new(RaptorAuthenticator::new(state.clone()));
     let base_path = state.base_path.clone();
 
-    // Create server with custom storage and authenticator
-    // The authenticator determines the User type (RaptorUser)
     let server = libunftp::ServerBuilder::<JailedFilesystem, RaptorUser>::with_authenticator(
         Box::new(move || JailedFilesystem::new(base_path.clone())),
         authenticator,
@@ -648,7 +613,6 @@ pub async fn start_ftp_server(state: Arc<FtpServerState>, addr: &str, port: u16)
     Ok(())
 }
 
-/// Credentials returned when creating FTP access
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FtpCredentials {
@@ -658,16 +622,14 @@ pub struct FtpCredentials {
     pub port: u16,
 }
 
-/// Create FTP access for a container
 pub fn create_ftp_access(
     state: &Arc<FtpServerState>,
     container_id: &str,
     password: &str,
 ) -> FtpCredentials {
-    // Username is first 8 characters of container UUID
+
     let username = container_id.replace("-", "")[..8].to_string();
 
-    // Add user to FTP server state (jailed to their container's volume)
     state.add_user(&username, password, container_id);
 
     let host = std::env::var("FTP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
@@ -684,7 +646,6 @@ pub fn create_ftp_access(
     }
 }
 
-/// Create admin FTP access (access to all volumes)
 pub fn create_admin_ftp_access(
     state: &Arc<FtpServerState>,
     username: &str,

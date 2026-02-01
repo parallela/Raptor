@@ -8,7 +8,6 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::models::{Allocation, AppState, CreateAllocationRequest, CreateIpPoolRequest, IpPool};
 
-/// List all allocations (for admin page) - includes both assigned and unassigned
 pub async fn list_all_allocations(State(state): State<AppState>) -> AppResult<Json<Vec<Allocation>>> {
     let allocations: Vec<Allocation> = sqlx::query_as(
         r#"SELECT * FROM allocations ORDER BY created_at DESC"#
@@ -18,9 +17,8 @@ pub async fn list_all_allocations(State(state): State<AppState>) -> AppResult<Js
     Ok(Json(allocations))
 }
 
-/// List only available (unassigned) allocations - for container creation dropdowns
 pub async fn list_allocations(State(state): State<AppState>) -> AppResult<Json<Vec<Allocation>>> {
-    // Only return allocations that are NOT already assigned to a container
+
     let allocations: Vec<Allocation> = sqlx::query_as(
         r#"SELECT a.* FROM allocations a
            WHERE NOT EXISTS (
@@ -162,7 +160,7 @@ pub async fn create_container_allocation(
     State(state): State<AppState>,
     Json(req): Json<crate::models::CreateContainerAllocationRequest>,
 ) -> AppResult<Json<crate::models::ContainerAllocation>> {
-    // If setting as primary, remove existing primary first
+
     if req.is_primary.unwrap_or(false) {
         sqlx::query("UPDATE container_allocations SET is_primary = FALSE WHERE container_id = $1 AND is_primary = TRUE")
             .bind(req.container_id)
@@ -170,7 +168,6 @@ pub async fn create_container_allocation(
             .await?;
     }
 
-    // Get allocation details (ip and port)
     let allocation: crate::models::Allocation = sqlx::query_as(
         "SELECT * FROM allocations WHERE id = $1"
     )
@@ -179,7 +176,6 @@ pub async fn create_container_allocation(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Use protocol from the allocation table
     let container_allocation: crate::models::ContainerAllocation = sqlx::query_as(
         r#"
         INSERT INTO container_allocations (id, container_id, allocation_id, ip, port, internal_port, protocol, is_primary)
@@ -219,6 +215,8 @@ pub async fn delete_container_allocation(
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAllocationRequest {
+    pub ip: Option<String>,
+    pub port: Option<i32>,
     pub protocol: Option<String>,
 }
 
@@ -235,23 +233,46 @@ pub async fn update_allocation(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    if req.ip.is_some() || req.port.is_some() {
+        #[derive(sqlx::FromRow)]
+        struct ContainerAllocationCheck {
+            id: Uuid,
+        }
+        let in_use: Option<ContainerAllocationCheck> = sqlx::query_as(
+            "SELECT id FROM container_allocations WHERE allocation_id = $1 LIMIT 1"
+        )
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?;
+
+        if in_use.is_some() && (req.ip.is_some() && req.ip.as_ref() != Some(&existing.ip) || req.port.is_some() && req.port != Some(existing.port)) {
+            return Err(AppError::BadRequest("Cannot change IP or port of an allocation that is in use".to_string()));
+        }
+    }
+
+    let ip = req.ip.unwrap_or(existing.ip);
+    let port = req.port.unwrap_or(existing.port);
     let protocol = req.protocol.unwrap_or(existing.protocol);
 
     let updated: crate::models::Allocation = sqlx::query_as(
         r#"
-        UPDATE allocations SET protocol = $1, updated_at = NOW()
-        WHERE id = $2
+        UPDATE allocations SET ip = $1, port = $2, protocol = $3, updated_at = NOW()
+        WHERE id = $4
         RETURNING *
         "#,
     )
+    .bind(&ip)
+    .bind(port)
     .bind(&protocol)
     .bind(id)
     .fetch_one(&state.db)
     .await?;
 
     sqlx::query(
-        "UPDATE container_allocations SET protocol = $1 WHERE allocation_id = $2"
+        "UPDATE container_allocations SET ip = $1, port = $2, protocol = $3 WHERE allocation_id = $4"
     )
+    .bind(&ip)
+    .bind(port)
     .bind(&protocol)
     .bind(id)
     .execute(&state.db)

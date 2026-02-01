@@ -48,7 +48,6 @@
         secure: false
     };
 
-    // Live daemon ping testing
     let pingStatus: { testing: boolean; online: boolean | null; latencyMs: number | null; error: string | null } = {
         testing: false,
         online: null,
@@ -69,7 +68,7 @@
             const result = await api.pingDaemon({
                 host,
                 port,
-                apiKey: 'test', // For testing, we just check if the daemon responds
+                apiKey: 'test',
                 secure
             });
 
@@ -94,7 +93,6 @@
         pingTimeout = setTimeout(() => testDaemonConnection(host, port, secure), 500);
     }
 
-    // Watch for changes in host/port/secure for live testing
     $: if (showCreate) {
         debouncedPingTest(newDaemon.host, newDaemon.port, newDaemon.secure);
     }
@@ -108,7 +106,6 @@
             goto('/login');
             return;
         }
-        // Check if user has permission to view daemons
         if (!$canViewDaemons) {
             toast.error('You do not have permission to view daemons');
             goto('/containers');
@@ -127,7 +124,7 @@
     function connectStatsWebSocket() {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const apiHost = import.meta.env.VITE_API_URL?.replace(/^https?:\/\//, '') || 'localhost:3000';
-        const wsUrl = `${wsProtocol}//${apiHost}/ws/daemons/stats`;
+        const wsUrl = `${wsProtocol}
 
         statsSocket = new WebSocket(wsUrl);
 
@@ -192,7 +189,6 @@
             daemonStatuses = { ...daemonStatuses, [id]: { status: 'offline' } };
         }
     }
-
 
     function formatBytes(bytes: number): string {
         if (bytes === 0) return '0 B';

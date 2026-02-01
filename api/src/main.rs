@@ -20,11 +20,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::config::Config;
 use crate::middleware::{require_permission, require_admin, require_manager};
 
-/// Chunk size for large file uploads (55MB)
 pub const UPLOAD_CHUNK_SIZE: usize = 55 * 1024 * 1024;
 
-/// Maximum body size for chunk uploads - accounts for multipart overhead
-pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 10 * 1024 * 1024; // 65MB for multipart
+pub const UPLOAD_CHUNK_BODY_LIMIT: usize = UPLOAD_CHUNK_SIZE + 10 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -67,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/reset-password", post(handlers::auth::reset_password))
         .route("/auth/accept-invite", post(handlers::users::accept_invite))
         .route("/ws/daemons/stats", get(handlers::daemons::ws_daemon_stats))
-        // WebSocket routes - auth via query param
+
         .route("/ws/containers/:id/logs", get(handlers::ws::container_logs))
         .route("/ws/containers/:id/stats", get(handlers::ws::container_stats));
 
@@ -97,8 +95,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id/files/read", get(handlers::containers::read_file))
         .route("/containers/:id/files/write", post(handlers::containers::write_file))
         .route("/containers/:id/files/upload", post(handlers::containers::upload_file)
-            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // chunk size + overhead
-        // Database routes (user-accessible)
+            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT)))
+
         .route("/databases", get(handlers::databases::list_databases))
         .route("/databases", post(handlers::databases::create_database))
         .route("/databases/available-types", get(handlers::databases::get_available_database_types))
@@ -106,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/databases/:id", delete(handlers::databases::delete_database))
         .route("/databases/:id/reset-password", post(handlers::databases::reset_database_password))
         .route("/containers/:id/files/upload-chunk", post(handlers::containers::upload_file_chunk)
-            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT))) // chunk size + overhead
+            .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT)))
         .route("/containers/:id/files/folder", post(handlers::containers::create_folder))
         .route("/containers/:id/files/delete", delete(handlers::containers::delete_file))
         .route("/daemons", get(handlers::daemons::list_daemons))
@@ -114,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/daemons/:id/status", get(handlers::daemons::get_daemon_status))
         .route("/roles", get(handlers::roles::list_roles))
         .route("/roles/:id", get(handlers::roles::get_role))
-        // Flakes (server templates)
+
         .route("/flakes", get(handlers::flakes::list_flakes))
         .route("/flakes/:id", get(handlers::flakes::get_flake))
         .route("/flakes/:id/export", get(handlers::flakes::export_flake));
@@ -147,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
             .route_layer(axum_middleware::from_fn(require_permission("allocations.create"))))
         .route("/container-allocations/:id", delete(handlers::allocations::delete_container_allocation)
             .route_layer(axum_middleware::from_fn(require_permission("allocations.delete"))))
-        // Flakes management (admin only)
+
         .route("/flakes", post(handlers::flakes::create_flake)
             .route_layer(axum_middleware::from_fn(require_permission("flakes.create"))))
         .route("/flakes/import", post(handlers::flakes::import_flake)
@@ -175,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
             .route_layer(axum_middleware::from_fn(require_permission("roles.update"))))
         .route("/admin/roles/:id", delete(handlers::roles::delete_role)
             .route_layer(axum_middleware::from_fn(require_permission("roles.delete"))))
-        // Database server management (admin only)
+
         .route("/admin/database-servers", get(handlers::databases::list_database_servers))
         .route("/admin/database-servers", post(handlers::databases::create_database_server))
         .route("/admin/database-servers/:id", get(handlers::databases::get_database_server))

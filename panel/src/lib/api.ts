@@ -2,10 +2,6 @@ import { get } from 'svelte/store';
 import { token } from './stores';
 import type { Container, Daemon, Allocation, ContainerAllocation, User, ResourceLimits, ContainerPort } from './types';
 
-// API URL priority:
-// 1. Runtime config from window.__CONFIG__.API_URL (injected at runtime)
-// 2. VITE_API_URL environment variable (set at build time)
-// 3. Empty string (same origin - API expected at same host)
 function getApiUrl(): string {
     if (typeof window !== 'undefined' && (window as any).__CONFIG__?.API_URL) {
         return (window as any).__CONFIG__.API_URL;
@@ -15,7 +11,6 @@ function getApiUrl(): string {
 
 const API_URL = getApiUrl();
 
-// Chunk size for large file uploads (55MB)
 export const UPLOAD_CHUNK_SIZE = 55 * 1024 * 1024;
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -63,26 +58,21 @@ async function requestText(path: string): Promise<string> {
 export interface CreateContainerData {
     daemonId: string;
     name: string;
-    // Either flakeId or image is required
     flakeId?: string;
     image?: string;
     startupScript?: string;
     allocationId?: string;
-    // Resource limits
-    memoryLimit?: number;      // Docker container memory limit
-    serverMemory?: number;     // Server/JVM heap memory (-Xmx)
+    memoryLimit?: number;
+    serverMemory?: number;
     cpuLimit?: number;
     diskLimit?: number;
     swapLimit?: number;
     ioWeight?: number;
-    // Optional user assignment (admin only)
     userId?: string;
-    // Flake variables (envVariable -> value)
     variables?: Record<string, string>;
 }
 
 export const api = {
-    // Auth
     login: (username: string, password: string) =>
         request<{ token: string; user: User }>('/auth/login', {
             method: 'POST',
@@ -107,7 +97,6 @@ export const api = {
             body: JSON.stringify({ token, password }),
         }),
 
-    // Containers
     listContainers: () => request<Container[]>('/containers'),
     getContainer: (id: string) => request<Container>(`/containers/${id}`),
     getContainerPorts: (id: string) => request<ContainerPort[]>(`/containers/${id}/ports`),
@@ -160,7 +149,6 @@ export const api = {
             body: JSON.stringify({ password })
         }),
 
-    // Daemons
     listDaemons: () => request<Daemon[]>('/daemons'),
     getDaemon: (id: string) => request<Daemon>(`/daemons/${id}`),
     getDaemonStatus: (id: string) => request<{ id: string; status: string; system?: { totalMemory: number; availableMemory: number; cpuCores: number; cpuUsage: number; totalDisk: number; availableDisk: number; hostname: string } }>(`/daemons/${id}/status`),
@@ -172,16 +160,14 @@ export const api = {
     pingDaemon: (data: { host: string; port: number; apiKey: string; secure?: boolean }) =>
         request<{ online: boolean; latencyMs?: number; version?: string; system?: any; error?: string }>('/admin/daemons/ping', { method: 'POST', body: JSON.stringify(data) }),
 
-    // Allocations
     listAllocations: () => request<Allocation[]>('/allocations'),
     listAllAllocations: () => request<Allocation[]>('/allocations/all'),
     createAllocation: (data: { daemonId: string; ip: string; port: number; protocol?: string }) =>
         request<Allocation>('/allocations', { method: 'POST', body: JSON.stringify(data) }),
-    updateAllocation: (id: string, data: { protocol?: string }) =>
+    updateAllocation: (id: string, data: { ip?: string; port?: number; protocol?: string }) =>
         request<Allocation>(`/allocations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteAllocation: (id: string) => request<void>(`/allocations/${id}`, { method: 'DELETE' }),
 
-    // Users
     getMe: () => request<User>('/users/me'),
     listUsers: async (): Promise<User[]> => {
         const response = await request<{ data: User[]; total: number; page: number; perPage: number; totalPages: number }>('/users');
@@ -204,7 +190,6 @@ export const api = {
             body: JSON.stringify({ token, username, password })
         }),
 
-    // Roles
     listRoles: () => request<{ id: string; name: string; permissions: Record<string, boolean> }[]>('/roles'),
     getRole: (id: string) => request<{ id: string; name: string; permissions: Record<string, boolean> }>(`/roles/${id}`),
     createRole: (data: { name: string; permissions: Record<string, boolean> }) =>
@@ -213,7 +198,6 @@ export const api = {
         request<{ id: string; name: string; permissions: Record<string, boolean> }>(`/admin/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteRole: (id: string) => request<void>(`/admin/roles/${id}`, { method: 'DELETE' }),
 
-    // Files
     listFiles: (containerId: string, path: string = '/') =>
         request<{ name: string; isDir: boolean; size: number; modified?: string }[]>(`/containers/${containerId}/files?path=${encodeURIComponent(path)}`),
     readFile: (containerId: string, path: string) =>
@@ -245,7 +229,6 @@ export const api = {
         return response.json();
     },
 
-    // Aliases for container file operations
     listContainerFiles: (containerId: string, path: string = '/') =>
         request<{ name: string; isDir: boolean; size: number; modified?: string }[]>(`/containers/${containerId}/files?path=${encodeURIComponent(path)}`),
     getContainerFile: (containerId: string, path: string) =>
@@ -260,7 +243,6 @@ export const api = {
         const t = get(token);
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
         
-        // For files smaller than chunk size, use simple upload
         if (file.size <= UPLOAD_CHUNK_SIZE) {
             const formData = new FormData();
             formData.append('file', file);
@@ -282,7 +264,6 @@ export const api = {
             return response.json();
         }
         
-        // For large files, use chunked upload
         const totalChunks = Math.ceil(file.size / UPLOAD_CHUNK_SIZE);
         const uploadId = crypto.randomUUID();
         
@@ -319,10 +300,8 @@ export const api = {
         return { message: 'Upload complete' };
     },
 
-    // Admin: All containers
     listAllContainers: () => request<Container[]>('/admin/containers'),
 
-    // Flakes
     listFlakes: () => request<import('./types').Flake[]>('/flakes'),
     getFlake: (id: string) => request<import('./types').FlakeWithVariables>(`/flakes/${id}`),
     createFlake: (data: any) => request<import('./types').FlakeWithVariables>('/flakes', { method: 'POST', body: JSON.stringify(data) }),
@@ -330,7 +309,6 @@ export const api = {
     deleteFlake: (id: string) => request<void>(`/flakes/${id}`, { method: 'DELETE' }),
     exportFlake: (id: string) => request<any>(`/flakes/${id}/export`),
 
-    // Databases
     listDatabases: () => request<any[]>('/databases'),
     getDatabase: (id: string) => request<any>(`/databases/${id}`),
     getAvailableDatabaseTypes: () => request<{ dbType: string; name: string; available: boolean }[]>('/databases/available-types'),
@@ -340,7 +318,6 @@ export const api = {
     resetDatabasePassword: (id: string) =>
         request<any>(`/databases/${id}/reset-password`, { method: 'POST' }),
 
-    // Admin: Database servers
     listDatabaseServers: () => request<any[]>('/admin/database-servers'),
     getDatabaseServer: (id: string) => request<any>(`/admin/database-servers/${id}`),
     createDatabaseServer: (data: { daemonId: string; dbType: string; port: number; containerName?: string }) =>
@@ -365,7 +342,6 @@ export function createWebSocket(containerId: string): WebSocket {
     if (apiUrl) {
         wsUrl = apiUrl.replace('http', 'ws');
     } else {
-        // Same origin - construct WebSocket URL from current location
         const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}`;
     }
@@ -380,7 +356,6 @@ export function createStatsWebSocket(containerId: string): WebSocket {
     if (apiUrl) {
         wsUrl = apiUrl.replace('http', 'ws');
     } else {
-        // Same origin - construct WebSocket URL from current location
         const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}`;
     }
