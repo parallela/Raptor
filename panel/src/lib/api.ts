@@ -334,7 +334,7 @@ export const api = {
         request<any>(`/admin/database-servers/${id}/restart`, { method: 'POST' }),
 };
 
-export function createWebSocket(containerId: string): WebSocket {
+export function createWebSocket(containerId: string, sinceMinutes: number = 10): WebSocket {
     const t = get(token);
     const apiUrl = getApiUrl();
     let wsUrl: string;
@@ -345,7 +345,8 @@ export function createWebSocket(containerId: string): WebSocket {
         const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}`;
     }
-    return new WebSocket(`${wsUrl}/ws/containers/${containerId}/logs?token=${t}`);
+    // Add since parameter to limit initial logs to last N minutes
+    return new WebSocket(`${wsUrl}/ws/containers/${containerId}/logs?token=${t}&since=${sinceMinutes}m`);
 }
 
 export function createStatsWebSocket(containerId: string): WebSocket {

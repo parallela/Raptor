@@ -339,7 +339,7 @@
         : 'console';
 </script>
 
-<div class="h-[calc(100vh-4rem)] flex flex-col">
+<div class="h-[calc(100vh-4rem)] md:h-[calc(100vh-4rem)] flex flex-col">
     {#if $loadingStore}
         <div class="flex items-center justify-center flex-1">
             <div class="text-center">
@@ -349,80 +349,105 @@
         </div>
     {:else if container}
         <div class="flex-shrink-0 border-b border-dark-700/50 bg-dark-900/50 backdrop-blur-sm">
-            <div class="px-6 py-4">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-4 min-w-0">
-                        <a href="/containers" class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors flex-shrink-0">
+            <div class="px-3 md:px-6 py-3 md:py-4">
+                <!-- Mobile: Compact header -->
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
+                        <a href="/containers" class="p-1.5 md:p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors flex-shrink-0">
                             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                             </svg>
                         </a>
-                        <div class="min-w-0">
-                            <h1 class="text-xl font-bold text-white truncate max-w-[300px]">{container.name}</h1>
-                            <div class="flex items-center gap-2 mt-1 flex-wrap">
+                        <div class="min-w-0 flex-1">
+                            <h1 class="text-base md:text-xl font-bold text-white truncate">{container.name}</h1>
+                            <div class="flex items-center gap-2 mt-0.5 md:mt-1 flex-wrap">
                                 {#if container.allocationIp && container.allocationPort}
-                                    <code class="text-sm font-mono text-primary-400 bg-dark-800 px-2 py-0.5 rounded">{container.allocationIp}:{container.allocationPort}</code>
-                                    <span class="text-dark-600 flex-shrink-0">•</span>
+                                    <code class="text-xs md:text-sm font-mono text-primary-400 bg-dark-800 px-1.5 md:px-2 py-0.5 rounded hidden sm:inline">{container.allocationIp}:{container.allocationPort}</code>
+                                    <span class="text-dark-600 flex-shrink-0 hidden sm:inline">•</span>
                                 {/if}
-                                <span class={`text-sm font-medium flex-shrink-0 ${getStatusColor(container.status)}`}>
+                                <span class={`text-xs md:text-sm font-medium flex-shrink-0 ${getStatusColor(container.status)}`}>
                                     {container.status === 'running' ? '● Online' : '○ Offline'}
                                 </span>
                             </div>
                         </div>
                     </div>
-                    <!-- Stats Display -->
-                    {#if isRunning && $statsStore}
-                        <div class="hidden md:flex items-center gap-4 px-4">
-                            <div class="text-center">
-                                <div class="text-xs text-dark-400 mb-1">CPU</div>
-                                <div class="text-sm font-medium text-white">{$statsStore.cpuPercent.toFixed(1)}%</div>
-                                <div class="w-16 h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
-                                    <div class="h-full bg-primary-500 rounded-full transition-all" style="width: {Math.min($statsStore.cpuPercent, 100)}%"></div>
-                                </div>
-                            </div>
-                            <div class="text-center">
-                                <div class="text-xs text-dark-400 mb-1">Memory</div>
-                                <div class="text-sm font-medium text-white">{formatStatsMemory($statsStore.memoryUsage)}</div>
-                                <div class="w-16 h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
-                                    <div class="h-full bg-emerald-500 rounded-full transition-all" style="width: {Math.min($statsStore.memoryPercent, 100)}%"></div>
-                                </div>
-                            </div>
-                            <div class="text-center">
-                                <div class="text-xs text-dark-400 mb-1">Network</div>
-                                <div class="text-xs font-medium text-white">↓{formatBytes($statsStore.networkRx)}</div>
-                                <div class="text-xs font-medium text-white">↑{formatBytes($statsStore.networkTx)}</div>
-                            </div>
-                        </div>
-                    {/if}
-                    <div class="flex items-center gap-2 flex-shrink-0">
+
+                    <!-- Action buttons - responsive -->
+                    <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
                         {#if isRunning}
-                            <button on:click={restartContainer} disabled={!!$actionLoadingStore} class="btn-secondary">
-                                {#if $actionLoadingStore === 'restart'}<span class="spinner w-4 h-4"></span>{/if}
-                                Restart
+                            <button on:click={restartContainer} disabled={!!$actionLoadingStore} class="btn-secondary text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
+                                {#if $actionLoadingStore === 'restart'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">Restart</span><span class="md:hidden">↻</span>{/if}
                             </button>
-                            <button on:click={stopContainer} disabled={!!$actionLoadingStore} class="btn-danger">
-                                {#if $actionLoadingStore === 'stop'}<span class="spinner w-4 h-4"></span>{/if}
-                                Stop
+                            <button on:click={stopContainer} disabled={!!$actionLoadingStore} class="btn-danger text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
+                                {#if $actionLoadingStore === 'stop'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">Stop</span><span class="md:hidden">■</span>{/if}
                             </button>
                         {:else}
-                            <button on:click={startContainer} disabled={!!$actionLoadingStore} class="btn-success">
-                                {#if $actionLoadingStore === 'start'}<span class="spinner w-4 h-4"></span>{/if}
-                                Start
+                            <button on:click={startContainer} disabled={!!$actionLoadingStore} class="btn-success text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
+                                {#if $actionLoadingStore === 'start'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">Start</span><span class="md:hidden">▶</span>{/if}
                             </button>
                         {/if}
                     </div>
                 </div>
-                <div class="flex gap-1 mt-4 -mb-4">
-                    <a href="/containers/{containerId}/console" class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'console' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
+
+                <!-- Mobile Stats Bar -->
+                {#if isRunning && $statsStore}
+                    <div class="flex items-center gap-3 mt-2 md:hidden overflow-x-auto pb-1">
+                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
+                            <span class="text-dark-400">CPU</span>
+                            <span class="text-white font-medium">{$statsStore.cpuPercent.toFixed(1)}%</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
+                            <span class="text-dark-400">RAM</span>
+                            <span class="text-white font-medium">{formatStatsMemory($statsStore.memoryUsage)}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
+                            <span class="text-dark-400">↓</span>
+                            <span class="text-white font-medium">{formatBytes($statsStore.networkRx)}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 text-xs whitespace-nowrap">
+                            <span class="text-dark-400">↑</span>
+                            <span class="text-white font-medium">{formatBytes($statsStore.networkTx)}</span>
+                        </div>
+                    </div>
+                {/if}
+
+                <!-- Desktop Stats Display -->
+                {#if isRunning && $statsStore}
+                    <div class="hidden md:flex items-center gap-4 px-4 absolute right-6 top-4">
+                        <div class="text-center">
+                            <div class="text-xs text-dark-400 mb-1">CPU</div>
+                            <div class="text-sm font-medium text-white">{$statsStore.cpuPercent.toFixed(1)}%</div>
+                            <div class="w-16 h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
+                                <div class="h-full bg-primary-500 rounded-full transition-all" style="width: {Math.min($statsStore.cpuPercent, 100)}%"></div>
+                            </div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-xs text-dark-400 mb-1">Memory</div>
+                            <div class="text-sm font-medium text-white">{formatStatsMemory($statsStore.memoryUsage)}</div>
+                            <div class="w-16 h-1 bg-dark-700 rounded-full mt-1 overflow-hidden">
+                                <div class="h-full bg-emerald-500 rounded-full transition-all" style="width: {Math.min($statsStore.memoryPercent, 100)}%"></div>
+                            </div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-xs text-dark-400 mb-1">Network</div>
+                            <div class="text-xs font-medium text-white">↓{formatBytes($statsStore.networkRx)}</div>
+                            <div class="text-xs font-medium text-white">↑{formatBytes($statsStore.networkTx)}</div>
+                        </div>
+                    </div>
+                {/if}
+
+                <!-- Tabs - scrollable on mobile -->
+                <div class="flex gap-1 mt-3 md:mt-4 -mb-3 md:-mb-4 overflow-x-auto">
+                    <a href="/containers/{containerId}/console" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'console' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
                         Console
                     </a>
-                    <a href="/containers/{containerId}/files" class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'files' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
+                    <a href="/containers/{containerId}/files" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'files' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
                         Files
                     </a>
-                    <a href="/containers/{containerId}/ftp" class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'ftp' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
+                    <a href="/containers/{containerId}/ftp" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'ftp' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
                         FTP
                     </a>
-                    <a href="/containers/{containerId}/settings" class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'settings' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
+                    <a href="/containers/{containerId}/settings" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'settings' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
                         Settings
                     </a>
                 </div>

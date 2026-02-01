@@ -4,6 +4,10 @@
     import { user, token, isAdmin, isManager, canViewDaemons } from '$lib/stores';
     import { goto } from '$app/navigation';
     import { page } from '$app/stores';
+    import { onMount } from 'svelte';
+
+    let sidebarOpen = false;
+    let isMobile = false;
 
     function logout() {
         $user = null;
@@ -11,7 +15,27 @@
         goto('/login');
     }
 
+    function closeSidebar() {
+        if (isMobile) sidebarOpen = false;
+    }
+
+    function checkMobile() {
+        isMobile = window.innerWidth < 768;
+        if (!isMobile) sidebarOpen = false;
+    }
+
+    onMount(() => {
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    });
+
     $: currentPath = $page.url.pathname;
+
+    // Close sidebar on navigation (mobile)
+    $: if (currentPath && isMobile) {
+        sidebarOpen = false;
+    }
 
     $: navItems = [
         { href: '/', label: 'Dashboard', icon: 'dashboard', show: true },
@@ -43,11 +67,45 @@
 
     {#if $user}
         <div class="relative flex">
+            <!-- Mobile Header -->
+            <header class="md:hidden fixed top-0 left-0 right-0 h-14 bg-dark-900/95 backdrop-blur-xl border-b border-dark-700/50 z-50 flex items-center justify-between px-4">
+                <button
+                    on:click={() => sidebarOpen = !sidebarOpen}
+                    class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-800 transition-colors"
+                >
+                    <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        {#if sidebarOpen}
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        {:else}
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                        {/if}
+                    </svg>
+                </button>
+                <a href="/" class="flex items-center">
+                    <img src="/logo.webp" alt="Raptor" class="h-8 object-contain" />
+                </a>
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
+                    {$user.username.charAt(0).toUpperCase()}
+                </div>
+            </header>
+
+            <!-- Mobile Overlay -->
+            {#if sidebarOpen && isMobile}
+                <div
+                    class="fixed inset-0 bg-dark-950/80 backdrop-blur-sm z-40 md:hidden"
+                    on:click={closeSidebar}
+                    on:keydown={(e) => e.key === 'Escape' && closeSidebar()}
+                    role="button"
+                    tabindex="-1"
+                ></div>
+            {/if}
+
             <!-- Sidebar -->
-            <aside class="fixed left-0 top-0 h-screen w-64 bg-dark-900/80 backdrop-blur-xl border-r border-dark-700/50 flex flex-col z-40">
+            <aside class="fixed left-0 top-0 h-screen w-64 bg-dark-900/95 backdrop-blur-xl border-r border-dark-700/50 flex flex-col z-50 transition-transform duration-300 ease-in-out
+                {isMobile ? (sidebarOpen ? 'translate-x-0' : '-translate-x-full') : 'translate-x-0'}">
                 <!-- Logo -->
                 <div class="h-28 flex items-center justify-center px-3 border-b border-dark-700/50 bg-gray-400">
-                    <a href="/" class="flex items-center justify-center w-full">
+                    <a href="/" class="flex items-center justify-center w-full" on:click={closeSidebar}>
                         <img src="/logo.webp" alt="Raptor" class="w-full object-contain brightness-110 contrast-110" />
                     </a>
                 </div>
@@ -57,6 +115,7 @@
                     {#each navItems as item}
                         <a
                             href={item.href}
+                            on:click={closeSidebar}
                             class="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 group
                                 {currentPath === item.href || (item.href !== '/' && currentPath.startsWith(item.href))
                                     ? 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
@@ -115,8 +174,8 @@
             </aside>
 
             <!-- Main content -->
-            <main class="flex-1 ml-64 min-h-screen flex flex-col">
-                <div class="flex-1 p-8 animate-fade-in">
+            <main class="flex-1 md:ml-64 min-h-screen flex flex-col pt-14 md:pt-0">
+                <div class="flex-1 p-4 md:p-8 animate-fade-in">
                     <slot />
                 </div>
                 <footer class="p-4 text-center text-xs text-dark-500 border-t border-dark-800">

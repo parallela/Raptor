@@ -886,10 +886,13 @@ pub async fn ws_logs(
         return (StatusCode::UNAUTHORIZED, "Invalid API key").into_response();
     }
 
-    ws.on_upgrade(move |socket| handle_logs_websocket(socket, state, id)).into_response()
+    // Parse since parameter (e.g., "10m" for 10 minutes)
+    let since = params.get("since").cloned();
+
+    ws.on_upgrade(move |socket| handle_logs_websocket(socket, state, id, since)).into_response()
 }
 
-async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, container_name: String) {
+async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, container_name: String, since: Option<String>) {
     let (mut sender, mut receiver) = socket.split();
 
     let container_info = {
@@ -1000,7 +1003,7 @@ async fn handle_logs_websocket(socket: WebSocket, state: Arc<AppState>, containe
 
     let docker_id = get_docker_id(&state, &container_name);
 
-    state.docker.stream_logs(&docker_id, tx);
+    state.docker.stream_logs(&docker_id, tx, since);
 
     let docker_id_for_cmd = docker_id.clone();
     let state_for_cmd = state.clone();

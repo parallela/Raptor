@@ -805,19 +805,42 @@ impl DockerManager {
         })
     }
 
-    pub fn stream_logs(&self, id: &str, tx: broadcast::Sender<String>) {
+    pub fn stream_logs(&self, id: &str, tx: broadcast::Sender<String>, since: Option<String>) {
         let docker = self.docker.clone();
         let id = id.to_string();
 
         tokio::spawn(async move {
-            tracing::info!("Starting log stream for container: {}", id);
+            tracing::info!("Starting log stream for container: {} (since: {:?})", id, since);
+
+            // Parse since parameter (e.g., "10m" for 10 minutes, "1h" for 1 hour)
+            let since_timestamp = since.and_then(|s| {
+                let s = s.trim();
+                if s.ends_with('m') {
+                    s[..s.len()-1].parse::<i64>().ok().map(|mins| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64 - (mins * 60)
+                    })
+                } else if s.ends_with('h') {
+                    s[..s.len()-1].parse::<i64>().ok().map(|hours| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64 - (hours * 3600)
+                    })
+                } else {
+                    None
+                }
+            });
 
             let historical_options = LogsOptions::<String> {
                 follow: false,
                 stdout: true,
                 stderr: true,
-                tail: "500".to_string(),
+                tail: if since_timestamp.is_some() { "all".to_string() } else { "500".to_string() },
                 timestamps: false,
+                since: since_timestamp.unwrap_or(0),
                 ..Default::default()
             };
 

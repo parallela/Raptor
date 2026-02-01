@@ -22,6 +22,8 @@ pub async fn container_logs(
     let token = params.get("token").ok_or(AppError::Unauthorized)?;
     validate_token(token, &state.config.jwt_secret)?;
 
+    let since = params.get("since").cloned();
+
     let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
@@ -34,7 +36,7 @@ pub async fn container_logs(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    Ok(ws.on_upgrade(move |socket| handle_logs_ws(socket, daemon, container)))
+    Ok(ws.on_upgrade(move |socket| handle_logs_ws(socket, daemon, container, since)))
 }
 
 fn validate_token(token: &str, secret: &str) -> Result<(), AppError> {
@@ -50,13 +52,14 @@ fn validate_token(token: &str, secret: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn handle_logs_ws(socket: WebSocket, daemon: Daemon, container: Container) {
+async fn handle_logs_ws(socket: WebSocket, daemon: Daemon, container: Container, since: Option<String>) {
     let (mut sender, mut receiver) = socket.split();
 
     let ws_protocol = if daemon.secure { "wss" } else { "ws" };
+    let since_param = since.as_ref().map(|s| format!("&since={}", s)).unwrap_or_default();
     let daemon_ws_url = format!(
-        "{}://{}:{}/ws/containers/{}/logs?api_key={}",
-        ws_protocol, daemon.host, daemon.port, container.id, daemon.api_key
+        "{}://{}:{}/ws/containers/{}/logs?api_key={}{}",
+        ws_protocol, daemon.host, daemon.port, container.id, daemon.api_key, since_param
     );
 
     tracing::info!("Connecting to daemon WebSocket: {}", daemon_ws_url);
