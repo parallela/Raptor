@@ -20,6 +20,15 @@
   ::-webkit-scrollbar-thumb {
     @apply bg-dark-600 rounded-full hover:bg-dark-500;
   }
+
+  /* Hide scrollbar utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer components {

@@ -325,24 +325,24 @@
      aria-label="File manager">
 
     <!-- Toolbar -->
-    <div class="flex-shrink-0 border-b border-dark-700 bg-dark-900 p-3">
-        <div class="flex items-center justify-between gap-4">
+    <div class="flex-shrink-0 border-b border-dark-700 bg-dark-900 p-2 md:p-3">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4">
             <!-- Breadcrumb Navigation -->
-            <div class="flex items-center gap-2 min-w-0 flex-1">
-                <button on:click={() => showNavSidebar = !showNavSidebar} class="p-1.5 rounded hover:bg-dark-700 text-dark-400 hover:text-white" title="Toggle sidebar">
+            <div class="flex items-center gap-1 md:gap-2 min-w-0 flex-1 overflow-x-auto">
+                <button on:click={() => showNavSidebar = !showNavSidebar} class="p-1.5 rounded hover:bg-dark-700 text-dark-400 hover:text-white flex-shrink-0" title="Toggle sidebar">
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                     </svg>
                 </button>
                 {#if currentPath !== '/'}
-                    <button on:click={goUp} class="p-1.5 rounded hover:bg-dark-700 text-dark-400 hover:text-white" title="Go up">
+                    <button on:click={goUp} class="p-1.5 rounded hover:bg-dark-700 text-dark-400 hover:text-white flex-shrink-0" title="Go up">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                         </svg>
                     </button>
                 {/if}
-                <div class="flex items-center gap-1 text-sm overflow-x-auto">
-                    <button on:click={() => goToPath('/')} class="text-dark-400 hover:text-white px-1">
+                <div class="flex items-center gap-1 text-sm overflow-x-auto flex-1 min-w-0 scrollbar-hide">
+                    <button on:click={() => goToPath('/')} class="text-dark-400 hover:text-white px-1 flex-shrink-0">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
                         </svg>
@@ -355,51 +355,45 @@
             </div>
 
             <!-- Actions -->
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1 md:gap-2 flex-shrink-0 flex-wrap justify-end">
                 {#if selectMode}
-                    <span class="text-sm text-dark-400">{selectedFiles.size} selected</span>
+                    <span class="text-xs md:text-sm text-dark-400">{selectedFiles.size}</span>
                     {#if selectedFiles.size > 0}
-                        <button on:click={() => showDeleteModal = true} class="btn-danger text-sm">
-                            <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <button on:click={() => showDeleteModal = true} class="btn-danger text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                             </svg>
-                            Delete
+                            <span class="hidden sm:inline ml-1">Delete</span>
                         </button>
                     {/if}
-                    <button on:click={selectAll} class="btn-ghost text-sm">Select All</button>
-                    <button on:click={exitSelectMode} class="btn-secondary text-sm">
-                        <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <button on:click={selectAll} class="btn-ghost text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5">All</button>
+                    <button on:click={exitSelectMode} class="btn-secondary text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
-                        Cancel
                     </button>
                 {:else}
-                    <button on:click={toggleSelectMode} class="btn-ghost text-sm" title="Select files">
-                        <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <button on:click={toggleSelectMode} class="btn-ghost text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5" title="Select files">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        Select
+                        <span class="hidden sm:inline ml-1">Select</span>
                     </button>
-                    <button on:click={() => showNewFolderModal = true} class="btn-secondary text-sm">
-                        <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <button on:click={() => showNewFolderModal = true} class="btn-secondary text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                         </svg>
-                        New Folder
+                        <span class="hidden sm:inline ml-1">Folder</span>
                     </button>
-                    <button on:click={triggerUpload} disabled={uploading} class="btn-primary text-sm relative">
+                    <button on:click={triggerUpload} disabled={uploading} class="btn-primary text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5 relative">
                         {#if uploading}
-                            <span class="spinner w-4 h-4 mr-1"></span>
-                            <span class="flex flex-col items-start">
-                                <span>{uploadProgress}%</span>
-                                {#if currentUploadFile}
-                                    <span class="text-[10px] opacity-70 truncate max-w-[100px]">{currentUploadFile}</span>
-                                {/if}
-                            </span>
+                            <span class="spinner w-4 h-4"></span>
+                            <span class="ml-1">{uploadProgress}%</span>
                         {:else}
-                            <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                             </svg>
-                            Upload
+                            <span class="hidden sm:inline ml-1">Upload</span>
                         {/if}
                     </button>
                 {/if}
@@ -438,7 +432,7 @@
             <div class="divide-y divide-dark-700/50">
                 {#each files as file}
                     <div
-                        class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-dark-700/30 transition-colors text-left group {selectedFiles.has(file.name) ? 'bg-primary-900/20' : ''}"
+                        class="w-full flex items-center gap-2 md:gap-3 px-2 md:px-4 py-2 md:py-2.5 hover:bg-dark-700/30 transition-colors text-left group {selectedFiles.has(file.name) ? 'bg-primary-900/20' : ''}"
                         role="button"
                         tabindex="0"
                         on:click={(e) => handleFileClick(file, e)}
@@ -460,9 +454,9 @@
                         {/if}
 
                         <!-- File Icon -->
-                        <div class="flex-shrink-0 w-8 h-8 flex items-center justify-center cursor-pointer">
+                        <div class="flex-shrink-0 w-6 h-6 md:w-8 md:h-8 flex items-center justify-center cursor-pointer">
                             {#if file.isDir}
-                                <svg class="w-7 h-7 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+                                <svg class="w-5 h-5 md:w-7 md:h-7 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
                                     <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
                                 </svg>
                             {:else}
@@ -518,16 +512,16 @@
 
                         <!-- File Name -->
                         <div class="flex-1 min-w-0">
-                            <span class="text-white truncate block">{file.name}</span>
+                            <span class="text-white truncate block text-sm md:text-base">{file.name}</span>
                         </div>
 
                         <!-- File Size -->
-                        <div class="flex-shrink-0 text-sm text-dark-400 font-mono w-20 text-right">
+                        <div class="flex-shrink-0 text-xs md:text-sm text-dark-400 font-mono w-14 md:w-20 text-right">
                             {file.isDir ? '-' : formatSize(file.size)}
                         </div>
 
                         <!-- Modified Date -->
-                        <div class="flex-shrink-0 text-sm text-dark-400 w-40 text-right hidden md:block">
+                        <div class="flex-shrink-0 text-xs md:text-sm text-dark-400 w-32 md:w-40 text-right hidden lg:block">
                             {formatDate(file.modified)}
                         </div>
 
