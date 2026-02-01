@@ -111,7 +111,7 @@ export const api = {
             body: JSON.stringify({ allocationId })
         }),
     getContainerAllocations: (id: string) => request<ContainerAllocation[]>(`/containers/${id}/allocations`),
-    getAvailableAllocations: (daemonId: string) => request<Allocation[]>(`/containers/${daemonId}/allocations/available`),
+    getAvailableAllocations: (containerId: string) => request<Allocation[]>(`/containers/${containerId}/allocations/available`),
     addContainerAllocation: (containerId: string, allocationId: string) =>
         request<{ message: string; allocationIp: string; allocationPort: number }>(`/containers/${containerId}/allocations`, {
             method: 'POST',

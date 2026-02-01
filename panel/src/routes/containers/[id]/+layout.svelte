@@ -128,7 +128,7 @@
         try {
             const [allocations, available] = await Promise.all([
                 api.getContainerAllocations(containerId),
-                api.getAvailableAllocations(container?.daemonId || '').catch(() => [])
+                api.getAvailableAllocations(containerId).catch(() => [])
             ]);
             allocationsStore.set(allocations);
             availableAllocationsStore.set(available);
