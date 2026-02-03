@@ -387,6 +387,9 @@
     "toPort": "To Port",
     "bulkCreate": "Bulk Create"
   },
+  "adminServers": {
+    "title": "Create Server"
+  },
   "adminFlakes": {
     "title": "Flakes",
     "subtitle": "Server templates and configurations",
