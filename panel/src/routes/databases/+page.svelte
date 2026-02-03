@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { api } from '$lib/api';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
 
     interface Database {
         id: string;
@@ -136,14 +137,14 @@
 </script>
 
 <svelte:head>
-    <title>Databases - Raptor</title>
+    <title>{$_('databases.title')} - Raptor</title>
 </svelte:head>
 
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <div>
-            <h1 class="text-2xl font-bold text-white">Databases</h1>
-            <p class="text-dark-400 mt-1">Manage your PostgreSQL, MySQL, and Redis databases</p>
+            <h1 class="text-2xl font-bold text-white">{$_('databases.title')}</h1>
+            <p class="text-dark-400 mt-1">{$_('databases.subtitle')}</p>
         </div>
         {#if canCreateDatabase}
             <button
@@ -153,10 +154,10 @@
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
-                Create Database
+                {$_('databases.createDatabase')}
             </button>
         {:else if !loading}
-            <div class="text-dark-400 text-sm">No database servers available</div>
+            <div class="text-dark-400 text-sm">{$_('databases.noDatabaseServers')}</div>
         {/if}
     </div>
 
@@ -165,7 +166,7 @@
         <div class="card p-8">
             <div class="flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-                <span class="ml-3 text-dark-400">Loading databases...</span>
+                <span class="ml-3 text-dark-400">{$_('common.loading')}</span>
             </div>
         </div>
     {:else if databases.length === 0}
@@ -174,14 +175,14 @@
             <svg class="w-16 h-16 mx-auto text-dark-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
             </svg>
-            <h3 class="text-lg font-medium text-white mb-2">No databases yet</h3>
+            <h3 class="text-lg font-medium text-white mb-2">{$_('databases.noDatabases')}</h3>
             {#if canCreateDatabase}
-                <p class="text-dark-400 mb-6">Create your first database to get started.</p>
+                <p class="text-dark-400 mb-6">{$_('dashboard.createFirstServer')}</p>
                 <button on:click={() => showCreateModal = true} class="btn-primary">
-                    Create Database
+                    {$_('databases.createDatabase')}
                 </button>
             {:else}
-                <p class="text-dark-400">No database servers are available. Contact your administrator to enable database services.</p>
+                <p class="text-dark-400">{$_('databases.noDatabaseServers')}</p>
             {/if}
         </div>
     {:else}

@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { api } from '$lib/api';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
 
     interface DatabaseServer {
         id: string;
@@ -302,7 +303,7 @@
         <div class="card p-8">
             <div class="flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-                <span class="ml-3 text-dark-400">Loading database servers...</span>
+                <span class="ml-3 text-dark-400">{$_('common.loading')}</span>
             </div>
         </div>
     {:else if servers.length === 0}

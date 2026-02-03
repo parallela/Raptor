@@ -4,6 +4,7 @@
     import { user } from '$lib/stores';
     import { goto } from '$app/navigation';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
     import type { User } from '$lib/types';
 
     let users: User[] = [];
@@ -92,15 +93,15 @@
                 </svg>
             </a>
             <div>
-                <h1 class="text-xl md:text-2xl font-bold text-white">User Management</h1>
-                <p class="text-sm text-dark-400">View and manage registered users</p>
+                <h1 class="text-xl md:text-2xl font-bold text-white">{$_('adminUsers.title')}</h1>
+                <p class="text-sm text-dark-400">{$_('adminUsers.subtitle')}</p>
             </div>
         </div>
         <button on:click={() => showInviteModal = true} class="btn-primary w-full sm:w-auto">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            Invite User
+            {$_('adminUsers.inviteUser')}
         </button>
     </div>
 
@@ -117,7 +118,7 @@
         <div class="flex items-center justify-center py-20">
             <div class="text-center">
                 <div class="spinner w-8 h-8 mx-auto mb-4"></div>
-                <p class="text-dark-400">Loading users...</p>
+                <p class="text-dark-400">{$_('common.loading')}</p>
             </div>
         </div>
     {:else if users.length > 0}

@@ -6,6 +6,7 @@
     import { api, createWebSocket, createStatsWebSocket } from '$lib/api';
     import { user } from '$lib/stores';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
     import type { Container, ContainerPort, ContainerAllocation, Allocation } from '$lib/types';
 
     interface ContainerStats {
@@ -348,7 +349,7 @@
         <div class="flex items-center justify-center flex-1">
             <div class="text-center">
                 <div class="spinner w-8 h-8 mx-auto mb-4"></div>
-                <p class="text-dark-400">Loading server...</p>
+                <p class="text-dark-400">{$_('common.loading')}</p>
             </div>
         </div>
     {:else if container}
@@ -370,7 +371,7 @@
                                     <span class="text-dark-600 flex-shrink-0 hidden sm:inline">•</span>
                                 {/if}
                                 <span class={`text-xs md:text-sm font-medium flex-shrink-0 ${getStatusColor(container.status)}`}>
-                                    {container.status === 'running' ? '● Online' : '○ Offline'}
+                                    {container.status === 'running' ? `● ${$_('containers.online')}` : `○ ${$_('containers.offline')}`}
                                 </span>
                             </div>
                         </div>
@@ -380,14 +381,14 @@
                     <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
                         {#if isRunning}
                             <button on:click={restartContainer} disabled={!!$actionLoadingStore} class="btn-secondary text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
-                                {#if $actionLoadingStore === 'restart'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">Restart</span><span class="md:hidden">↻</span>{/if}
+                                {#if $actionLoadingStore === 'restart'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">{$_('container.restart')}</span><span class="md:hidden">↻</span>{/if}
                             </button>
                             <button on:click={stopContainer} disabled={!!$actionLoadingStore} class="btn-danger text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
-                                {#if $actionLoadingStore === 'stop'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">Stop</span><span class="md:hidden">■</span>{/if}
+                                {#if $actionLoadingStore === 'stop'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">{$_('container.stop')}</span><span class="md:hidden">■</span>{/if}
                             </button>
                         {:else}
                             <button on:click={startContainer} disabled={!!$actionLoadingStore} class="btn-success text-xs md:text-sm px-2 md:px-4 py-1.5 md:py-2.5">
-                                {#if $actionLoadingStore === 'start'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">Start</span><span class="md:hidden">▶</span>{/if}
+                                {#if $actionLoadingStore === 'start'}<span class="spinner w-3 h-3 md:w-4 md:h-4"></span>{:else}<span class="hidden md:inline">{$_('container.start')}</span><span class="md:hidden">▶</span>{/if}
                             </button>
                         {/if}
                     </div>
@@ -478,16 +479,16 @@
                 <!-- Tabs - scrollable on mobile -->
                 <div class="flex gap-1 mt-3 md:mt-4 -mb-3 md:-mb-4 overflow-x-auto">
                     <a href="/containers/{containerId}/console" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'console' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
-                        Console
+                        {$_('container.console')}
                     </a>
                     <a href="/containers/{containerId}/files" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'files' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
-                        Files
+                        {$_('container.files')}
                     </a>
                     <a href="/containers/{containerId}/ftp" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'ftp' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
-                        FTP
+                        {$_('container.ftp')}
                     </a>
                     <a href="/containers/{containerId}/settings" class="px-3 md:px-4 py-2 rounded-t-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'settings' ? 'bg-dark-800 text-white' : 'text-dark-400 hover:text-white hover:bg-dark-800/50'}">
-                        Settings
+                        {$_('container.settings')}
                     </a>
                 </div>
             </div>
@@ -498,7 +499,7 @@
         </div>
     {:else}
         <div class="flex items-center justify-center flex-1">
-            <p class="text-dark-400">Server not found</p>
+            <p class="text-dark-400">{$_('container.containerNotFound')}</p>
         </div>
     {/if}
 </div>

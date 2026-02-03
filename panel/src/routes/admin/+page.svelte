@@ -3,6 +3,7 @@
     import { api } from '$lib/api';
     import { user } from '$lib/stores';
     import { goto } from '$app/navigation';
+    import { _ } from '$lib/i18n';
     import type { Container, Daemon, User } from '$lib/types';
 
     let containers: Container[] = [];
@@ -47,15 +48,15 @@
 <div class="space-y-6 md:space-y-8">
     <!-- Header -->
     <div>
-        <h1 class="text-xl md:text-2xl font-bold text-white">Admin Dashboard</h1>
-        <p class="text-sm text-dark-400">Manage servers, users, and system resources</p>
+        <h1 class="text-xl md:text-2xl font-bold text-white">{$_('admin.title')}</h1>
+        <p class="text-sm text-dark-400">{$_('admin.subtitle')}</p>
     </div>
 
     {#if loading}
         <div class="flex items-center justify-center py-20">
             <div class="text-center">
                 <div class="spinner w-8 h-8 mx-auto mb-4"></div>
-                <p class="text-dark-400">Loading admin data...</p>
+                <p class="text-dark-400">{$_('common.loading')}</p>
             </div>
         </div>
     {:else}
@@ -65,9 +66,9 @@
             <div class="card p-4 md:p-6 animate-slide-up">
                 <div class="flex items-center justify-between">
                     <div class="min-w-0">
-                        <p class="text-dark-400 text-xs md:text-sm font-medium">Total Servers</p>
+                        <p class="text-dark-400 text-xs md:text-sm font-medium">{$_('admin.totalServers')}</p>
                         <p class="text-2xl md:text-3xl font-bold text-white mt-1">{containers.length}</p>
-                        <p class="text-xs text-emerald-400 mt-1">{runningContainers} running</p>
+                        <p class="text-xs text-emerald-400 mt-1">{runningContainers} {$_('dashboard.runningServers').toLowerCase()}</p>
                     </div>
                     <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-primary-500/10 flex items-center justify-center flex-shrink-0">
                         <svg class="w-5 h-5 md:w-6 md:h-6 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -81,9 +82,9 @@
             <div class="card p-4 md:p-6 animate-slide-up" style="animation-delay: 50ms;">
                 <div class="flex items-center justify-between">
                     <div class="min-w-0">
-                        <p class="text-dark-400 text-xs md:text-sm font-medium">Nodes</p>
+                        <p class="text-dark-400 text-xs md:text-sm font-medium">{$_('admin.nodes')}</p>
                         <p class="text-2xl md:text-3xl font-bold text-white mt-1">{daemons.length}</p>
-                        <p class="text-xs text-dark-400 mt-1">Active daemons</p>
+                        <p class="text-xs text-dark-400 mt-1">{$_('admin.activeDaemons')}</p>
                     </div>
                     <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
                         <svg class="w-5 h-5 md:w-6 md:h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -97,9 +98,9 @@
             <div class="card p-4 md:p-6 animate-slide-up" style="animation-delay: 100ms;">
                 <div class="flex items-center justify-between">
                     <div class="min-w-0">
-                        <p class="text-dark-400 text-xs md:text-sm font-medium">Users</p>
+                        <p class="text-dark-400 text-xs md:text-sm font-medium">{$_('admin.users')}</p>
                         <p class="text-2xl md:text-3xl font-bold text-white mt-1">{users.length || '—'}</p>
-                        <p class="text-xs text-dark-400 mt-1">Registered</p>
+                        <p class="text-xs text-dark-400 mt-1">{$_('admin.registeredAccounts')}</p>
                     </div>
                     <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
                         <svg class="w-5 h-5 md:w-6 md:h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -113,7 +114,7 @@
             <div class="card p-4 md:p-6 animate-slide-up" style="animation-delay: 150ms;">
                 <div class="flex items-center justify-between">
                     <div class="min-w-0">
-                        <p class="text-dark-400 text-xs md:text-sm font-medium">Memory</p>
+                        <p class="text-dark-400 text-xs md:text-sm font-medium">{$_('admin.memoryUsage')}</p>
                         <p class="text-2xl md:text-3xl font-bold text-white mt-1">
                             {totalMemory > 0 ? Math.round((usedMemory / totalMemory) * 100) : 0}%
                         </p>
@@ -138,7 +139,7 @@
                         </svg>
                     </div>
                     <div class="text-center md:text-left">
-                        <h3 class="text-sm md:text-lg font-semibold text-white group-hover:text-primary-400 transition-colors duration-200">Create Server</h3>
+                        <h3 class="text-sm md:text-lg font-semibold text-white group-hover:text-primary-400 transition-colors duration-200">{$_('admin.createServer')}</h3>
                         <p class="text-xs md:text-sm text-dark-400 hidden md:block">Deploy a new server</p>
                     </div>
                 </div>

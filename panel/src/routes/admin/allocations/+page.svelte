@@ -5,6 +5,7 @@
     import { Select } from '$lib/components';
     import { goto } from '$app/navigation';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
     import type { Allocation, Daemon } from '$lib/types';
 
     let allocations: Allocation[] = [];
@@ -350,7 +351,7 @@
         <div class="flex items-center justify-center py-20">
             <div class="text-center">
                 <div class="spinner w-8 h-8 mx-auto mb-4"></div>
-                <p class="text-dark-400">Loading allocations...</p>
+                <p class="text-dark-400">{$_('common.loading')}</p>
             </div>
         </div>
     {:else}

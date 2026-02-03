@@ -5,6 +5,8 @@
     import { goto } from '$app/navigation';
     import { page } from '$app/stores';
     import { onMount } from 'svelte';
+    import { _ } from '$lib/i18n';
+    import { LocaleSelector } from '$lib/components';
 
     let sidebarOpen = false;
     let isMobile = false;
@@ -38,11 +40,11 @@
     }
 
     $: navItems = [
-        { href: '/', label: 'Dashboard', icon: 'dashboard', show: true },
-        { href: '/containers', label: 'Containers', icon: 'containers', show: true },
-        { href: '/databases', label: 'Database', icon: 'database', show: true },
-        { href: '/daemons', label: 'Daemons', icon: 'daemons', show: $canViewDaemons },
-        { href: '/admin', label: 'Admin', icon: 'admin', show: $isAdmin || $isManager },
+        { href: '/', label: $_('nav.dashboard'), icon: 'dashboard', show: true },
+        { href: '/containers', label: $_('nav.containers'), icon: 'containers', show: true },
+        { href: '/databases', label: $_('nav.database'), icon: 'database', show: true },
+        { href: '/daemons', label: $_('nav.daemons'), icon: 'daemons', show: $canViewDaemons },
+        { href: '/admin', label: $_('nav.admin'), icon: 'admin', show: $isAdmin || $isManager },
     ].filter(item => item.show);
 
     $: roleName = $user?.roleName
@@ -84,8 +86,11 @@
                 <a href="/" class="flex items-center">
                     <img src="/logo.webp" alt="Raptor" class="h-8 object-contain" />
                 </a>
-                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
-                    {$user.username.charAt(0).toUpperCase()}
+                <div class="flex items-center gap-2">
+                    <LocaleSelector />
+                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
+                        {$user.username.charAt(0).toUpperCase()}
+                    </div>
                 </div>
             </header>
 
@@ -149,7 +154,10 @@
                 </nav>
 
                 <!-- User section -->
-                <div class="p-4 border-t border-dark-700/50">
+                <div class="p-4 border-t border-dark-700/50 space-y-3">
+                    <div class="flex items-center justify-center">
+                        <LocaleSelector />
+                    </div>
                     <div class="flex items-center justify-between p-3 rounded-lg bg-dark-800/50">
                         <div class="flex items-center gap-3">
                             <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
@@ -163,7 +171,7 @@
                         <button
                             on:click={logout}
                             class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/50 transition-colors duration-200"
-                            title="Logout"
+                            title={$_('nav.logout')}
                         >
                             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />

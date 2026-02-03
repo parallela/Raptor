@@ -6,6 +6,7 @@
     import UserSearch from '$lib/components/UserSearch.svelte';
     import { goto } from '$app/navigation';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
     import type { Container, Daemon, User, Flake, FlakeVariable } from '$lib/types';
 
     interface FlakeWithVariables extends Flake {
@@ -205,15 +206,15 @@
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-            <h1 class="text-xl md:text-2xl font-bold text-white">Servers</h1>
-            <p class="text-sm text-dark-400">Manage your game servers and applications</p>
+            <h1 class="text-xl md:text-2xl font-bold text-white">{$_('containers.title')}</h1>
+            <p class="text-sm text-dark-400">{$_('containers.subtitle')}</p>
         </div>
         {#if $canCreateContainers}
             <button on:click={() => showCreate = true} class="btn-primary w-full sm:w-auto">
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
-                Create Server
+                {$_('containers.createServer')}
             </button>
         {/if}
     </div>
@@ -444,7 +445,7 @@
         <div class="flex items-center justify-center py-20">
             <div class="text-center">
                 <div class="spinner w-8 h-8 mx-auto mb-4"></div>
-                <p class="text-dark-400">Loading servers...</p>
+                <p class="text-dark-400">{$_('common.loading')}</p>
             </div>
         </div>
     {:else}

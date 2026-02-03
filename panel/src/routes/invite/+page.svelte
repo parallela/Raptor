@@ -4,6 +4,8 @@
     import { goto } from '$app/navigation';
     import { api } from '$lib/api';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
+    import { LocaleSelector } from '$lib/components';
 
     let token = '';
     let username = '';
@@ -49,21 +51,26 @@
 </script>
 
 <svelte:head>
-    <title>Accept Invitation - Raptor</title>
+    <title>{$_('invite.title')} - Raptor</title>
 </svelte:head>
 
-<div class="min-h-screen flex items-center justify-center p-4">
+<div class="min-h-screen flex items-center justify-center p-4 relative">
+    <!-- Language Selector - Top Right -->
+    <div class="absolute top-4 right-4 z-10">
+        <LocaleSelector />
+    </div>
+
     <div class="w-full max-w-md">
         <div class="text-center mb-8">
             <img src="/logo.webp" alt="Raptor" class="h-12 mx-auto mb-4" />
-            <h1 class="text-2xl font-bold text-white">Accept Invitation</h1>
-            <p class="text-dark-400 mt-2">Create your account to get started</p>
+            <h1 class="text-2xl font-bold text-white">{$_('invite.title')}</h1>
+            <p class="text-dark-400 mt-2">{$_('invite.subtitle')}</p>
         </div>
 
         {#if validating}
             <div class="card p-8 text-center">
                 <span class="spinner w-8 h-8 mx-auto"></span>
-                <p class="text-dark-400 mt-4">Validating invitation...</p>
+                <p class="text-dark-400 mt-4">{$_('common.loading')}</p>
             </div>
         {:else if invalidToken}
             <div class="card p-8 text-center">
@@ -72,48 +79,48 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </div>
-                <h2 class="text-xl font-semibold text-white mb-2">Invalid Invitation</h2>
-                <p class="text-dark-400 mb-6">This invitation link is invalid or has expired.</p>
-                <a href="/login" class="btn-primary inline-flex">Go to Login</a>
+                <h2 class="text-xl font-semibold text-white mb-2">{$_('invite.invalidToken')}</h2>
+                <p class="text-dark-400 mb-6">{$_('invite.invalidToken')}</p>
+                <a href="/login" class="btn-primary inline-flex">{$_('auth.login')}</a>
             </div>
         {:else}
             <form on:submit|preventDefault={acceptInvite} class="card p-8 space-y-6">
                 <div class="input-group">
-                    <label for="username" class="input-label">Username</label>
+                    <label for="username" class="input-label">{$_('auth.username')}</label>
                     <input
                         type="text"
                         id="username"
                         bind:value={username}
                         class="input"
-                        placeholder="Choose a username"
+                        placeholder={$_('auth.enterUsername')}
                         required
                         autocomplete="username"
                     />
                 </div>
 
                 <div class="input-group">
-                    <label for="password" class="input-label">Password</label>
+                    <label for="password" class="input-label">{$_('auth.password')}</label>
                     <input
                         type="password"
                         id="password"
                         bind:value={password}
                         class="input"
-                        placeholder="Create a password"
+                        placeholder={$_('auth.enterPassword')}
                         required
                         autocomplete="new-password"
                         minlength="8"
                     />
-                    <p class="text-xs text-dark-500 mt-1">Must be at least 8 characters</p>
+                    <p class="text-xs text-dark-500 mt-1">{$_('validation.minLength', { min: '8' })}</p>
                 </div>
 
                 <div class="input-group">
-                    <label for="confirm-password" class="input-label">Confirm Password</label>
+                    <label for="confirm-password" class="input-label">{$_('auth.confirmPassword')}</label>
                     <input
                         type="password"
                         id="confirm-password"
                         bind:value={confirmPassword}
                         class="input"
-                        placeholder="Confirm your password"
+                        placeholder={$_('auth.enterPassword')}
                         required
                         autocomplete="new-password"
                     />
@@ -123,11 +130,11 @@
                     {#if loading}
                         <span class="spinner w-5 h-5 mr-2"></span>
                     {/if}
-                    Create Account
+                    {$_('invite.completeSetup')}
                 </button>
 
                 <p class="text-center text-dark-400 text-sm">
-                    Already have an account? <a href="/login" class="text-primary-400 hover:text-primary-300">Log in</a>
+                    {$_('auth.alreadyHaveAccount')} <a href="/login" class="text-primary-400 hover:text-primary-300">{$_('auth.signIn')}</a>
                 </p>
             </form>
         {/if}

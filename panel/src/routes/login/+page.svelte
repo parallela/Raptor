@@ -2,6 +2,8 @@
     import { api } from '$lib/api';
     import { user, token } from '$lib/stores';
     import { goto } from '$app/navigation';
+    import { _ } from '$lib/i18n';
+    import { LocaleSelector } from '$lib/components';
 
     let username = '';
     let email = '';
@@ -56,6 +58,11 @@
         <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-500/5 rounded-full blur-3xl"></div>
     </div>
 
+    <!-- Language Selector - Top Right -->
+    <div class="absolute top-4 right-4 z-10">
+        <LocaleSelector />
+    </div>
+
     <div class="relative w-full max-w-md animate-slide-up">
         <!-- Logo -->
         <div class="text-center mb-8">
@@ -70,11 +77,11 @@
         <div class="card p-8">
             <h2 class="text-xl font-semibold text-white text-center mb-6">
                 {#if isForgotPassword}
-                    Reset your password
+                    {$_('auth.resetYourPassword')}
                 {:else if isRegister}
-                    Create an account
+                    {$_('auth.createAccount')}
                 {:else}
-                    Welcome back
+                    {$_('auth.welcomeBack')}
                 {/if}
             </h2>
 
@@ -100,7 +107,7 @@
                 {#if isForgotPassword}
                     <!-- Forgot Password: Email only -->
                     <div class="input-group">
-                        <label for="email" class="input-label">Email</label>
+                        <label for="email" class="input-label">{$_('auth.email')}</label>
                         <div class="relative">
                             <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                 <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -112,7 +119,7 @@
                                 id="email"
                                 bind:value={email}
                                 class="input pl-12"
-                                placeholder="Enter your email"
+                                placeholder={$_('auth.enterEmail')}
                                 required
                             />
                         </div>
@@ -120,7 +127,7 @@
                 {:else}
                     <!-- Username field -->
                     <div class="input-group">
-                        <label for="username" class="input-label">{isRegister ? 'Username' : 'Username or Email'}</label>
+                        <label for="username" class="input-label">{isRegister ? $_('auth.username') : $_('auth.usernameOrEmail')}</label>
                         <div class="relative">
                             <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                 <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -132,7 +139,7 @@
                                 id="username"
                                 bind:value={username}
                                 class="input pl-12"
-                                placeholder="Enter your username"
+                                placeholder={$_('auth.enterUsername')}
                                 required
                             />
                         </div>
@@ -141,7 +148,7 @@
                     <!-- Email field (only for registration) -->
                     {#if isRegister}
                         <div class="input-group">
-                            <label for="email" class="input-label">Email</label>
+                            <label for="email" class="input-label">{$_('auth.email')}</label>
                             <div class="relative">
                                 <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                     <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -153,7 +160,7 @@
                                     id="email"
                                     bind:value={email}
                                     class="input pl-12"
-                                    placeholder="Enter your email"
+                                    placeholder={$_('auth.enterEmail')}
                                     required
                                 />
                             </div>
@@ -162,7 +169,7 @@
 
                     <!-- Password field -->
                     <div class="input-group">
-                        <label for="password" class="input-label">Password</label>
+                        <label for="password" class="input-label">{$_('auth.password')}</label>
                         <div class="relative">
                             <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                 <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -174,7 +181,7 @@
                                 id="password"
                                 bind:value={password}
                                 class="input pl-12"
-                                placeholder="Enter your password"
+                                placeholder={$_('auth.enterPassword')}
                                 required
                             />
                         </div>
@@ -188,7 +195,7 @@
                                 on:click={() => { isForgotPassword = true; resetForm(); }}
                                 class="text-sm text-primary-400 hover:text-primary-300 transition-colors duration-200"
                             >
-                                Forgot password?
+                                {$_('auth.forgotPassword')}
                             </button>
                         </div>
                     {/if}
@@ -201,13 +208,13 @@
                 >
                     {#if loading}
                         <span class="spinner"></span>
-                        <span>Please wait...</span>
+                        <span>{$_('common.loading')}</span>
                     {:else if isForgotPassword}
-                        Send Reset Link
+                        {$_('auth.sendResetLink')}
                     {:else if isRegister}
-                        Create Account
+                        {$_('auth.signUp')}
                     {:else}
-                        Sign In
+                        {$_('auth.signIn')}
                     {/if}
                 </button>
             </form>
@@ -215,28 +222,28 @@
             <div class="mt-6 pt-6 border-t border-dark-700/50">
                 <p class="text-center text-dark-400 text-sm">
                     {#if isForgotPassword}
-                        Remember your password?
+                        {$_('auth.alreadyHaveAccount')}
                         <button
                             on:click={() => { isForgotPassword = false; resetForm(); }}
                             class="text-primary-400 hover:text-primary-300 font-medium ml-1 transition-colors duration-200"
                         >
-                            Sign in
+                            {$_('auth.signIn')}
                         </button>
                     {:else if isRegister}
-                        Already have an account?
+                        {$_('auth.alreadyHaveAccount')}
                         <button
                             on:click={() => { isRegister = false; resetForm(); }}
                             class="text-primary-400 hover:text-primary-300 font-medium ml-1 transition-colors duration-200"
                         >
-                            Sign in
+                            {$_('auth.signIn')}
                         </button>
                     {:else}
-                        Don't have an account?
+                        {$_('auth.dontHaveAccount')}
                         <button
                             on:click={() => { isRegister = true; resetForm(); }}
                             class="text-primary-400 hover:text-primary-300 font-medium ml-1 transition-colors duration-200"
                         >
-                            Create one
+                            {$_('auth.signUp')}
                         </button>
                     {/if}
                 </p>

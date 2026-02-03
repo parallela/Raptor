@@ -3,6 +3,7 @@
     import { api } from '$lib/api';
     import { user } from '$lib/stores';
     import { goto } from '$app/navigation';
+    import { _ } from '$lib/i18n';
     import type { Container } from '$lib/types';
 
     let containers: Container[] = [];
@@ -38,15 +39,15 @@
 <div class="space-y-8">
     <!-- Header -->
     <div>
-        <h1 class="section-title">Dashboard</h1>
-        <p class="section-subtitle">Welcome back, {$user?.username}. Here's what's happening with your containers.</p>
+        <h1 class="section-title">{$_('dashboard.title')}</h1>
+        <p class="section-subtitle">{$_('dashboard.welcomeMessage', { username: $user?.username || '' })}</p>
     </div>
 
     {#if loading}
         <div class="flex items-center justify-center py-20">
             <div class="text-center">
                 <div class="spinner w-8 h-8 mx-auto mb-4"></div>
-                <p class="text-dark-400">Loading your dashboard...</p>
+                <p class="text-dark-400">{$_('common.loading')}</p>
             </div>
         </div>
     {:else}
@@ -56,7 +57,7 @@
             <div class="card p-6 animate-slide-up" style="animation-delay: 0ms;">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-dark-400 text-sm font-medium">Total Containers</p>
+                        <p class="text-dark-400 text-sm font-medium">{$_('dashboard.totalServers')}</p>
                         <p class="text-3xl font-bold text-white mt-1">{containers.length}</p>
                     </div>
                     <div class="w-12 h-12 rounded-xl bg-primary-500/10 flex items-center justify-center">
@@ -71,7 +72,7 @@
             <div class="card p-6 animate-slide-up" style="animation-delay: 50ms;">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-dark-400 text-sm font-medium">Running</p>
+                        <p class="text-dark-400 text-sm font-medium">{$_('dashboard.runningServers')}</p>
                         <p class="text-3xl font-bold text-emerald-400 mt-1">{runningCount}</p>
                     </div>
                     <div class="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
@@ -86,7 +87,7 @@
             <div class="card p-6 animate-slide-up" style="animation-delay: 100ms;">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-dark-400 text-sm font-medium">Stopped</p>
+                        <p class="text-dark-400 text-sm font-medium">{$_('dashboard.stoppedServers')}</p>
                         <p class="text-3xl font-bold text-red-400 mt-1">{stoppedCount}</p>
                     </div>
                     <div class="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center">
@@ -101,12 +102,12 @@
             <div class="card p-6 animate-slide-up" style="animation-delay: 150ms;">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-dark-400 text-sm font-medium">Quick Action</p>
+                        <p class="text-dark-400 text-sm font-medium">{$_('dashboard.quickActions')}</p>
                         <a href="/containers" class="btn-primary btn-sm mt-3 inline-flex">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                             </svg>
-                            New Container
+                            {$_('containers.newServer')}
                         </a>
                     </div>
                     <div class="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
@@ -121,9 +122,9 @@
         <!-- Containers Section -->
         <div>
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-lg font-semibold text-white">Your Containers</h2>
+                <h2 class="text-lg font-semibold text-white">{$_('containers.myServers')}</h2>
                 <a href="/containers" class="text-sm text-primary-400 hover:text-primary-300 transition-colors duration-200">
-                    View all →
+                    {$_('common.view')} {$_('common.all')} →
                 </a>
             </div>
 
@@ -167,13 +168,13 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
                             </svg>
                         </div>
-                        <h3 class="text-lg font-semibold text-white mb-2">No containers yet</h3>
-                        <p class="text-dark-400 mb-6">Get started by creating your first container</p>
+                        <h3 class="text-lg font-semibold text-white mb-2">{$_('dashboard.noServers')}</h3>
+                        <p class="text-dark-400 mb-6">{$_('dashboard.createFirstServer')}</p>
                         <a href="/containers" class="btn-primary inline-flex">
                             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                             </svg>
-                            Create Container
+                            {$_('containers.createServer')}
                         </a>
                     </div>
                 {/each}

@@ -2,6 +2,8 @@
     import { api } from '$lib/api';
     import { goto } from '$app/navigation';
     import { page } from '$app/stores';
+    import { _ } from '$lib/i18n';
+    import { LocaleSelector } from '$lib/components';
 
     let password = '';
     let confirmPassword = '';
@@ -46,6 +48,11 @@
         <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-500/5 rounded-full blur-3xl"></div>
     </div>
 
+    <!-- Language Selector - Top Right -->
+    <div class="absolute top-4 right-4 z-10">
+        <LocaleSelector />
+    </div>
+
     <div class="relative w-full max-w-md animate-slide-up">
         <!-- Logo -->
         <div class="text-center mb-8">
@@ -59,7 +66,7 @@
         <!-- Card -->
         <div class="card p-8">
             <h2 class="text-xl font-semibold text-white text-center mb-6">
-                Reset Your Password
+                {$_('auth.resetYourPassword')}
             </h2>
 
             {#if !token}
@@ -67,10 +74,10 @@
                     <svg class="w-5 h-5 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                     </svg>
-                    <span class="text-red-400 text-sm">Invalid or missing reset token</span>
+                    <span class="text-red-400 text-sm">{$_('invite.invalidToken')}</span>
                 </div>
                 <a href="/login" class="btn-primary w-full h-12 text-base flex items-center justify-center">
-                    Back to Login
+                    {$_('auth.backToLogin')}
                 </a>
             {:else}
                 {#if error}
@@ -92,7 +99,7 @@
                 {:else}
                     <form on:submit|preventDefault={handleSubmit} class="space-y-5">
                         <div class="input-group">
-                            <label for="password" class="input-label">New Password</label>
+                            <label for="password" class="input-label">{$_('auth.newPassword')}</label>
                             <div class="relative">
                                 <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                     <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -104,7 +111,7 @@
                                     id="password"
                                     bind:value={password}
                                     class="input pl-12"
-                                    placeholder="Enter new password"
+                                    placeholder={$_('auth.enterPassword')}
                                     required
                                     minlength="6"
                                 />
@@ -112,7 +119,7 @@
                         </div>
 
                         <div class="input-group">
-                            <label for="confirmPassword" class="input-label">Confirm Password</label>
+                            <label for="confirmPassword" class="input-label">{$_('auth.confirmPassword')}</label>
                             <div class="relative">
                                 <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                     <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -124,7 +131,7 @@
                                     id="confirmPassword"
                                     bind:value={confirmPassword}
                                     class="input pl-12"
-                                    placeholder="Confirm new password"
+                                    placeholder={$_('auth.enterPassword')}
                                     required
                                 />
                             </div>
@@ -137,9 +144,9 @@
                         >
                             {#if loading}
                                 <span class="spinner"></span>
-                                <span>Resetting...</span>
+                                <span>{$_('common.loading')}</span>
                             {:else}
-                                Reset Password
+                                {$_('auth.resetPassword')}
                             {/if}
                         </button>
                     </form>
@@ -149,7 +156,7 @@
             <div class="mt-6 pt-6 border-t border-dark-700/50">
                 <p class="text-center text-dark-400 text-sm">
                     <a href="/login" class="text-primary-400 hover:text-primary-300 font-medium transition-colors duration-200">
-                        Back to Login
+                        {$_('auth.backToLogin')}
                     </a>
                 </p>
             </div>

@@ -5,6 +5,7 @@
     import type { Writable } from 'svelte/store';
     import { api } from '$lib/api';
     import toast from 'svelte-french-toast';
+    import { _ } from '$lib/i18n';
     import type { Container } from '$lib/types';
 
     interface FileEntry {
