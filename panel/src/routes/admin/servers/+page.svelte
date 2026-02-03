@@ -114,7 +114,7 @@
 </script>
 
 <svelte:head>
-    <title>{$_('admin.servers.title')} - Admin - Raptor</title>
+    <title>{$_('adminServers.title')} - Admin - Raptor</title>
 </svelte:head>
 
 <div class="space-y-4 md:space-y-6 max-w-4xl mx-auto">
