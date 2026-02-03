@@ -14,6 +14,12 @@
     let isRegister = false;
     let isForgotPassword = false;
 
+    // 2FA state
+    let requires2FA = false;
+    let pendingUserId = '';
+    let twoFactorCode = '';
+    let isBackupCode = false;
+
     async function handleSubmit() {
         error = '';
         success = '';
@@ -30,9 +36,34 @@
                 success = 'Account created successfully! Please login.';
             } else {
                 const res = await api.login(username, password);
+                if (res.requires2fa && res.userId) {
+                    // 2FA required - show 2FA input
+                    requires2FA = true;
+                    pendingUserId = res.userId;
+                } else if (res.token && res.user) {
+                    $token = res.token;
+                    $user = res.user;
+                    goto('/');
+                }
+            }
+        } catch (e: any) {
+            error = e.message || 'An error occurred';
+        } finally {
+            loading = false;
+        }
+    }
+
+    async function handle2FASubmit() {
+        error = '';
+        loading = true;
+        try {
+            const res = await api.verify2FALogin(pendingUserId, twoFactorCode, isBackupCode);
+            if (res.valid && res.token && res.user) {
                 $token = res.token;
                 $user = res.user;
                 goto('/');
+            } else {
+                error = 'Invalid verification code. Please try again.';
             }
         } catch (e: any) {
             error = e.message || 'An error occurred';
@@ -46,6 +77,18 @@
         success = '';
         username = '';
         email = '';
+        password = '';
+        requires2FA = false;
+        pendingUserId = '';
+        twoFactorCode = '';
+        isBackupCode = false;
+    }
+
+    function cancel2FA() {
+        requires2FA = false;
+        pendingUserId = '';
+        twoFactorCode = '';
+        isBackupCode = false;
         password = '';
     }
 </script>
@@ -76,7 +119,9 @@
         <!-- Card -->
         <div class="card p-8">
             <h2 class="text-xl font-semibold text-white text-center mb-6">
-                {#if isForgotPassword}
+                {#if requires2FA}
+                    Two-Factor Authentication
+                {:else if isForgotPassword}
                     {$_('auth.resetYourPassword')}
                 {:else if isRegister}
                     {$_('auth.createAccount')}
@@ -103,50 +148,78 @@
                 </div>
             {/if}
 
-            <form on:submit|preventDefault={handleSubmit} class="space-y-5">
-                {#if isForgotPassword}
-                    <!-- Forgot Password: Email only -->
-                    <div class="input-group">
-                        <label for="email" class="input-label">{$_('auth.email')}</label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                                </svg>
-                            </div>
-                            <input
-                                type="email"
-                                id="email"
-                                bind:value={email}
-                                class="input pl-12"
-                                placeholder={$_('auth.enterEmail')}
-                                required
-                            />
+            {#if requires2FA}
+                <!-- 2FA Verification Form -->
+                <form on:submit|preventDefault={handle2FASubmit} class="space-y-5">
+                    <div class="text-center mb-4">
+                        <div class="w-16 h-16 rounded-2xl bg-primary-500/10 flex items-center justify-center mx-auto mb-4">
+                            <svg class="w-8 h-8 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                            </svg>
                         </div>
+                        <p class="text-dark-400 text-sm">
+                            Enter the 6-digit code from your authenticator app
+                        </p>
                     </div>
-                {:else}
-                    <!-- Username field -->
+
                     <div class="input-group">
-                        <label for="username" class="input-label">{isRegister ? $_('auth.username') : $_('auth.usernameOrEmail')}</label>
+                        <label for="twoFactorCode" class="input-label">Verification Code</label>
                         <div class="relative">
                             <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                 <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
                                 </svg>
                             </div>
                             <input
                                 type="text"
-                                id="username"
-                                bind:value={username}
-                                class="input pl-12"
-                                placeholder={$_('auth.enterUsername')}
+                                id="twoFactorCode"
+                                bind:value={twoFactorCode}
+                                class="input pl-12 text-center tracking-[0.5em] font-mono text-lg"
+                                placeholder="000000"
+                                maxlength="8"
+                                autocomplete="one-time-code"
                                 required
                             />
                         </div>
                     </div>
 
-                    <!-- Email field (only for registration) -->
-                    {#if isRegister}
+                    <div class="flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            id="isBackupCode"
+                            bind:checked={isBackupCode}
+                            class="w-4 h-4 rounded border-dark-600 bg-dark-800 text-primary-500 focus:ring-primary-500/50"
+                        />
+                        <label for="isBackupCode" class="text-sm text-dark-400">
+                            Use a backup code instead
+                        </label>
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="btn-primary w-full h-12 text-base"
+                        disabled={loading}
+                    >
+                        {#if loading}
+                            <span class="spinner"></span>
+                            <span>{$_('common.loading')}</span>
+                        {:else}
+                            Verify
+                        {/if}
+                    </button>
+
+                    <button
+                        type="button"
+                        on:click={cancel2FA}
+                        class="btn-secondary w-full"
+                    >
+                        Back to Login
+                    </button>
+                </form>
+            {:else}
+                <form on:submit|preventDefault={handleSubmit} class="space-y-5">
+                    {#if isForgotPassword}
+                        <!-- Forgot Password: Email only -->
                         <div class="input-group">
                             <label for="email" class="input-label">{$_('auth.email')}</label>
                             <div class="relative">
@@ -155,6 +228,47 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
                                     </svg>
                                 </div>
+                                <input
+                                    type="email"
+                                    id="email"
+                                    bind:value={email}
+                                    class="input pl-12"
+                                    placeholder={$_('auth.enterEmail')}
+                                    required
+                                />
+                            </div>
+                        </div>
+                    {:else}
+                        <!-- Username field -->
+                        <div class="input-group">
+                            <label for="username" class="input-label">{isRegister ? $_('auth.username') : $_('auth.usernameOrEmail')}</label>
+                            <div class="relative">
+                                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                                    </svg>
+                                </div>
+                                <input
+                                    type="text"
+                                    id="username"
+                                    bind:value={username}
+                                    class="input pl-12"
+                                    placeholder={$_('auth.enterUsername')}
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Email field (only for registration) -->
+                        {#if isRegister}
+                            <div class="input-group">
+                                <label for="email" class="input-label">{$_('auth.email')}</label>
+                                <div class="relative">
+                                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                        <svg class="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                                        </svg>
+                                    </div>
                                 <input
                                     type="email"
                                     id="email"
@@ -218,6 +332,7 @@
                     {/if}
                 </button>
             </form>
+            {/if}
 
             <div class="mt-6 pt-6 border-t border-dark-700/50">
                 <p class="text-center text-dark-400 text-sm">

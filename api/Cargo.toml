@@ -34,3 +34,12 @@ md5 = "0.7"
 base64 = "0.21"
 # Docker integration for database containers
 bollard = "0.16"
+# 2FA TOTP support
+totp-rs = { version = "5", features = ["qr", "gen_secret"] }
+# QR code generation
+qrcode = "0.13"
+# Image encoding for QR
+image = { version = "0.24", default-features = false, features = ["png"] }
+# HMAC for secure operations
+hmac = "0.12"
+sha2 = "0.10"

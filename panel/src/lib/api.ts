@@ -74,9 +74,15 @@ export interface CreateContainerData {
 
 export const api = {
     login: (username: string, password: string) =>
-        request<{ token: string; user: User }>('/auth/login', {
+        request<{ token?: string; user?: User; requires2fa: boolean; userId?: string }>('/auth/login', {
             method: 'POST',
             body: JSON.stringify({ username, password }),
+        }),
+    
+    verify2FALogin: (userId: string, code: string, isBackupCode: boolean = false) =>
+        request<{ valid: boolean; token?: string; user?: User }>('/auth/2fa/validate', {
+            method: 'POST',
+            body: JSON.stringify({ userId, code, isBackupCode }),
         }),
     
     register: (username: string, email: string, password: string) =>
@@ -95,6 +101,33 @@ export const api = {
         request<{ message: string }>('/auth/reset-password', {
             method: 'POST',
             body: JSON.stringify({ token, password }),
+        }),
+
+    // 2FA endpoints
+    get2FAStatus: () => request<{ enabled: boolean; verifiedAt?: string }>('/users/me/2fa'),
+    
+    setup2FA: (password: string) =>
+        request<{ secret: string; qrCode: string; otpauthUrl: string }>('/users/me/2fa/setup', {
+            method: 'POST',
+            body: JSON.stringify({ password }),
+        }),
+    
+    verify2FA: (code: string) =>
+        request<{ success: boolean; backupCodes?: string[] }>('/users/me/2fa/verify', {
+            method: 'POST',
+            body: JSON.stringify({ code }),
+        }),
+    
+    disable2FA: (password: string, code: string) =>
+        request<{ message: string }>('/users/me/2fa/disable', {
+            method: 'POST',
+            body: JSON.stringify({ password, code }),
+        }),
+    
+    regenerateBackupCodes: (code: string) =>
+        request<string[]>('/users/me/2fa/backup-codes', {
+            method: 'POST',
+            body: JSON.stringify({ code }),
         }),
 
     listContainers: () => request<Container[]>('/containers'),

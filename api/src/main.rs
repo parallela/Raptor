@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/forgot-password", post(handlers::auth::forgot_password))
         .route("/auth/reset-password", post(handlers::auth::reset_password))
         .route("/auth/accept-invite", post(handlers::users::accept_invite))
+        .route("/auth/2fa/validate", post(handlers::two_factor::validate_2fa_login))
         .route("/ws/daemons/stats", get(handlers::daemons::ws_daemon_stats))
 
         .route("/ws/containers/:id/logs", get(handlers::ws::container_logs))
@@ -71,6 +72,11 @@ async fn main() -> anyhow::Result<()> {
 
     let user_routes = Router::new()
         .route("/users/me", get(handlers::users::get_me))
+        .route("/users/me/2fa", get(handlers::two_factor::get_2fa_status))
+        .route("/users/me/2fa/setup", post(handlers::two_factor::setup_2fa))
+        .route("/users/me/2fa/verify", post(handlers::two_factor::verify_2fa))
+        .route("/users/me/2fa/disable", post(handlers::two_factor::disable_2fa))
+        .route("/users/me/2fa/backup-codes", post(handlers::two_factor::regenerate_backup_codes))
         .route("/containers", get(handlers::containers::list_containers))
         .route("/containers/:id", get(handlers::containers::get_container))
         .route("/containers/:id", patch(handlers::containers::update_container))

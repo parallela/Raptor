@@ -159,7 +159,7 @@
                         <LocaleSelector />
                     </div>
                     <div class="flex items-center justify-between p-3 rounded-lg bg-dark-800/50">
-                        <div class="flex items-center gap-3">
+                        <a href="/security" class="flex items-center gap-3 hover:opacity-80 transition-opacity">
                             <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
                                 {$user.username.charAt(0).toUpperCase()}
                             </div>
@@ -167,7 +167,7 @@
                                 <span class="text-sm font-medium text-white">{$user.username}</span>
                                 <span class="text-xs text-dark-400">{roleName}</span>
                             </div>
-                        </div>
+                        </a>
                         <button
                             on:click={logout}
                             class="p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/50 transition-colors duration-200"

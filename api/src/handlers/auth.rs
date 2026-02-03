@@ -11,10 +11,22 @@ use crate::models::{
     RegisterRequest, ResetPasswordRequest, Role, User, UserResponse,
 };
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginResponseWith2FA {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<UserResponse>,
+    pub requires_2fa: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+}
+
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
-) -> AppResult<Json<LoginResponse>> {
+) -> AppResult<Json<LoginResponseWith2FA>> {
     let user: User = sqlx::query_as("SELECT * FROM users WHERE username = $1 OR email = $1")
         .bind(&req.username)
         .fetch_optional(&state.db)
@@ -23,6 +35,23 @@ pub async fn login(
 
     if !verify(&req.password, &user.password_hash).unwrap_or(false) {
         return Err(AppError::Unauthorized);
+    }
+
+    // Check if 2FA is enabled
+    let totp_enabled: bool = sqlx::query_scalar("SELECT totp_enabled FROM users WHERE id = $1")
+        .bind(user.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+
+    if totp_enabled {
+        // Return response indicating 2FA is required
+        return Ok(Json(LoginResponseWith2FA {
+            token: None,
+            user: None,
+            requires_2fa: true,
+            user_id: Some(user.id.to_string()),
+        }));
     }
 
     let (role_name, _) = fetch_user_role(&state, user.role_id).await?;
@@ -48,9 +77,9 @@ pub async fn login(
 
     let avatar_url = UserResponse::gravatar_url(user.email.as_deref());
 
-    Ok(Json(LoginResponse {
-        token,
-        user: UserResponse {
+    Ok(Json(LoginResponseWith2FA {
+        token: Some(token),
+        user: Some(UserResponse {
             id: user.id,
             username: user.username,
             email: user.email,
@@ -58,7 +87,9 @@ pub async fn login(
             role_id: user.role_id,
             role_name,
             permissions,
-        },
+        }),
+        requires_2fa: false,
+        user_id: None,
     }))
 }
 
@@ -210,7 +241,7 @@ pub async fn reset_password(
     Ok(Json(serde_json::json!({"message": "Password has been reset successfully"})))
 }
 
-async fn fetch_user_role(
+pub async fn fetch_user_role(
     state: &AppState,
     role_id: Option<Uuid>,
 ) -> Result<(Option<String>, serde_json::Value), AppError> {

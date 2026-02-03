@@ -5,5 +5,6 @@ pub mod daemons;
 pub mod databases;
 pub mod flakes;
 pub mod roles;
+pub mod two_factor;
 pub mod users;
 pub mod ws;

@@ -1,15 +1,47 @@
 use axum::{
+    async_trait,
     body::Body,
-    extract::State,
-    http::{header, Request, StatusCode},
+    extract::{FromRequestParts, State},
+    http::{header, request::Parts, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use std::future::Future;
 use std::pin::Pin;
+use uuid::Uuid;
 
 use crate::models::{AppState, Claims};
+
+#[derive(Debug, Clone)]
+pub struct AuthUser {
+    pub id: Uuid,
+    pub username: String,
+    pub role_id: Option<Uuid>,
+    pub role_name: Option<String>,
+}
+
+#[async_trait]
+impl<S> FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let claims = parts
+            .extensions
+            .get::<Claims>()
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+
+        Ok(AuthUser {
+            id: claims.sub,
+            username: claims.username.clone(),
+            role_id: claims.role_id,
+            role_name: claims.role_name.clone(),
+        })
+    }
+}
 
 pub async fn auth(
     State(state): State<AppState>,
