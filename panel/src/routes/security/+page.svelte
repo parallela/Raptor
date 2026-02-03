@@ -342,66 +342,58 @@
                     </form>
 
                 {:else if setupStep === 'qrcode'}
-                    <div class="text-center mb-6">
+                    <div class="text-center mb-4">
                         <h3 class="text-xl font-semibold text-white">{$_('security.scanQRCode')}</h3>
                         <p class="text-dark-400 text-sm mt-2">Scan this QR code with your authenticator app</p>
                     </div>
 
                     <div class="flex flex-col items-center space-y-4">
-                        <div class="bg-white p-4 rounded-xl">
-                            <img src={qrCode} alt="2FA QR Code" class="w-48 h-48" />
+                        <div class="bg-white p-3 rounded-xl">
+                            <img src={qrCode} alt="2FA QR Code" class="w-40 h-40" />
                         </div>
 
-                        <div class="w-full">
-                            <p class="text-dark-400 text-xs mb-2 text-center">Or enter this code manually:</p>
-                            <div class="bg-dark-800 p-3 rounded-lg">
-                                <code class="text-primary-400 text-sm break-all font-mono">{secret}</code>
+                        <details class="w-full">
+                            <summary class="text-dark-400 text-xs cursor-pointer hover:text-dark-300">
+                                Can't scan? Enter code manually
+                            </summary>
+                            <div class="bg-dark-800 p-3 rounded-lg mt-2">
+                                <code class="text-primary-400 text-xs break-all font-mono">{secret}</code>
                             </div>
-                        </div>
+                        </details>
 
                         <p class="text-dark-500 text-xs">
                             Compatible with Google Authenticator, Authy, 1Password, etc.
                         </p>
-
-                        <button on:click={() => setupStep = 'verify'} class="btn-primary w-full">
-                            {$_('common.continue')}
-                        </button>
                     </div>
 
-                {:else if setupStep === 'verify'}
-                    <div class="text-center mb-6">
-                        <h3 class="text-xl font-semibold text-white">{$_('security.verifyCode')}</h3>
-                        <p class="text-dark-400 text-sm mt-2">Enter the 6-digit code from your authenticator app</p>
+                    <!-- Verification input right below QR code -->
+                    <div class="mt-6 pt-6 border-t border-dark-700/50">
+                        <form on:submit|preventDefault={verifySetup} class="space-y-4">
+                            <div class="input-group">
+                                <label for="verify-code" class="input-label">{$_('security.verificationCode')}</label>
+                                <input
+                                    type="text"
+                                    id="verify-code"
+                                    bind:value={setupCode}
+                                    class="input text-center tracking-[0.5em] font-mono text-lg"
+                                    placeholder="000000"
+                                    maxlength="6"
+                                    inputmode="numeric"
+                                    pattern="[0-9]*"
+                                    autocomplete="one-time-code"
+                                    required
+                                />
+                                <p class="text-xs text-dark-500 mt-1">Enter the 6-digit code from your authenticator app</p>
+                            </div>
+                            <button type="submit" class="btn-primary w-full" disabled={setupLoading || setupCode.length < 6}>
+                                {#if setupLoading}
+                                    <span class="spinner"></span>
+                                {:else}
+                                    {$_('security.verify')}
+                                {/if}
+                            </button>
+                        </form>
                     </div>
-
-                    <form on:submit|preventDefault={verifySetup} class="space-y-4">
-                        <div class="input-group">
-                            <label for="verify-code" class="input-label">{$_('security.verificationCode')}</label>
-                            <input
-                                type="text"
-                                id="verify-code"
-                                bind:value={setupCode}
-                                class="input text-center tracking-[0.5em] font-mono text-lg"
-                                placeholder="000000"
-                                maxlength="6"
-                                inputmode="numeric"
-                                pattern="[0-9]*"
-                                autocomplete="one-time-code"
-                                required
-                            />
-                            <p class="text-xs text-dark-500 mt-1">Enter the 6-digit code from your authenticator app</p>
-                        </div>
-                        <button type="submit" class="btn-primary w-full" disabled={setupLoading || setupCode.length < 6}>
-                            {#if setupLoading}
-                                <span class="spinner"></span>
-                            {:else}
-                                {$_('security.verify')}
-                            {/if}
-                        </button>
-                        <button type="button" on:click={() => setupStep = 'qrcode'} class="btn-secondary w-full">
-                            {$_('common.back')}
-                        </button>
-                    </form>
 
                 {:else if setupStep === 'backup'}
                     <div class="text-center mb-6">
