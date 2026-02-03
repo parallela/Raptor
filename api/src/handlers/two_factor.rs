@@ -79,11 +79,11 @@ fn create_totp(secret: &str, username: &str) -> Result<TOTP, AppError> {
     let secret_bytes = Secret::Encoded(secret.to_string())
         .to_bytes()
         .map_err(|e| AppError::Internal(format!("Invalid TOTP secret: {}", e)))?;
-    
+
     TOTP::new(
         Algorithm::SHA1,
         6,
-        1,
+        3,  // Allow 3 steps tolerance (90 seconds before/after) for clock drift
         30,
         secret_bytes,
         Some(TOTP_ISSUER.to_string()),
@@ -160,7 +160,10 @@ pub async fn setup_2fa(
         .get_qr_base64()
         .map_err(|e| AppError::Internal(format!("Failed to generate QR code: {}", e)))?;
 
-    let otpauth_url = totp.get_url();
+    // Get the base otpauth URL and add image parameter for authenticator apps that support it
+    let base_url = totp.get_url();
+    let icon_url = format!("{}/favicon.png", state.config.app_url);
+    let otpauth_url = format!("{}&image={}", base_url, urlencoding::encode(&icon_url));
 
     // Store secret (not yet enabled)
     sqlx::query("UPDATE users SET totp_secret = $1, updated_at = NOW() WHERE id = $2")
@@ -197,19 +200,45 @@ pub async fn verify_2fa(
 
     let secret = secret.ok_or(AppError::BadRequest("2FA setup not started".into()))?;
 
+    // Clean the code - remove any spaces or dashes and trim
+    let clean_code = req.code.trim().replace(" ", "").replace("-", "");
+
     // Verify the code
     let totp = create_totp(&secret, &auth_user.username)?;
-    
-    if !totp.check_current(&req.code).unwrap_or(false) {
+
+    tracing::info!("Verifying 2FA code for user {}: code='{}', length={}",
+        auth_user.username, clean_code, clean_code.len());
+
+    // Generate what the current code should be for debugging
+    let expected_code = totp.generate_current()
+        .map_err(|e| AppError::Internal(format!("Failed to generate TOTP: {}", e)))?;
+    tracing::info!("Expected TOTP code: {}", expected_code);
+
+    // Use check_current which handles time window automatically
+    let is_valid = match totp.check_current(&clean_code) {
+        Ok(valid) => valid,
+        Err(e) => {
+            tracing::error!("TOTP check error: {}", e);
+            false
+        }
+    };
+
+    tracing::info!("TOTP validation result: {}", is_valid);
+
+    if !is_valid {
+        tracing::warn!("Invalid 2FA code for user {}. Got: {}, Expected: {}",
+            auth_user.username, clean_code, expected_code);
         return Ok(Json(Verify2FAResponse {
             success: false,
             backup_codes: None,
         }));
     }
 
+    tracing::info!("2FA verification successful for user {}", auth_user.username);
+
     // Generate backup codes
     let backup_codes = generate_backup_codes();
-    
+
     // Hash backup codes before storing
     let mut tx = state.db.begin().await?;
 
@@ -229,7 +258,7 @@ pub async fn verify_2fa(
     for code in &backup_codes {
         let code_hash = hash(code.replace("-", "").as_str(), 4)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        
+
         sqlx::query(
             "INSERT INTO totp_backup_codes (id, user_id, code_hash, created_at) VALUES ($1, $2, $3, NOW())"
         )
@@ -324,7 +353,7 @@ pub async fn regenerate_backup_codes(
 
     // Generate new backup codes
     let backup_codes = generate_backup_codes();
-    
+
     let mut tx = state.db.begin().await?;
 
     sqlx::query("DELETE FROM totp_backup_codes WHERE user_id = $1")
@@ -335,7 +364,7 @@ pub async fn regenerate_backup_codes(
     for code in &backup_codes {
         let code_hash = hash(code.replace("-", "").as_str(), 4)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        
+
         sqlx::query(
             "INSERT INTO totp_backup_codes (id, user_id, code_hash, created_at) VALUES ($1, $2, $3, NOW())"
         )

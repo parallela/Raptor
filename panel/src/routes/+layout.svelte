@@ -88,9 +88,13 @@
                 </a>
                 <div class="flex items-center gap-2">
                     <LocaleSelector />
-                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
-                        {$user.username.charAt(0).toUpperCase()}
-                    </div>
+                    {#if $user.avatarUrl}
+                        <img src={$user.avatarUrl} alt={$user.username} class="w-10 h-10 rounded-full" />
+                    {:else}
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
+                            {$user.username.charAt(0).toUpperCase()}
+                        </div>
+                    {/if}
                 </div>
             </header>
 
@@ -160,9 +164,13 @@
                     </div>
                     <div class="flex items-center justify-between p-3 rounded-lg bg-dark-800/50">
                         <a href="/security" class="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
-                                {$user.username.charAt(0).toUpperCase()}
-                            </div>
+                            {#if $user.avatarUrl}
+                                <img src={$user.avatarUrl} alt={$user.username} class="w-9 h-9 rounded-full" />
+                            {:else}
+                                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold text-sm">
+                                    {$user.username.charAt(0).toUpperCase()}
+                                </div>
+                            {/if}
                             <div class="flex flex-col">
                                 <span class="text-sm font-medium text-white">{$user.username}</span>
                                 <span class="text-xs text-dark-400">{roleName}</span>

@@ -74,16 +74,29 @@
     async function verifySetup() {
         setupLoading = true;
         try {
-            const response = await api.verify2FA(setupCode);
+            // Clean the code - remove spaces and ensure it's trimmed
+            const cleanCode = setupCode.trim().replace(/\s/g, '').replace(/-/g, '');
+            console.log('Verifying 2FA code:', cleanCode, 'length:', cleanCode.length);
+
+            if (cleanCode.length !== 6) {
+                toast.error('Please enter a 6-digit code');
+                setupLoading = false;
+                return;
+            }
+
+            const response = await api.verify2FA(cleanCode);
+            console.log('Verify 2FA response:', response);
+
             if (response.success) {
                 backupCodes = response.backupCodes || [];
                 setupStep = 'backup';
                 await loadStatus();
                 toast.success('Two-factor authentication enabled!');
             } else {
-                toast.error('Invalid verification code');
+                toast.error('Invalid verification code. Please try again.');
             }
         } catch (e: any) {
+            console.error('Verify 2FA error:', e);
             toast.error(e.message || 'Failed to verify code');
         } finally {
             setupLoading = false;
@@ -371,11 +384,14 @@
                                 class="input text-center tracking-[0.5em] font-mono text-lg"
                                 placeholder="000000"
                                 maxlength="6"
+                                inputmode="numeric"
+                                pattern="[0-9]*"
                                 autocomplete="one-time-code"
                                 required
                             />
+                            <p class="text-xs text-dark-500 mt-1">Enter the 6-digit code from your authenticator app</p>
                         </div>
-                        <button type="submit" class="btn-primary w-full" disabled={setupLoading}>
+                        <button type="submit" class="btn-primary w-full" disabled={setupLoading || setupCode.length < 6}>
                             {#if setupLoading}
                                 <span class="spinner"></span>
                             {:else}
