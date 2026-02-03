@@ -131,6 +131,10 @@
     }
 </script>
 
+<svelte:head>
+    <title>{container?.name || 'Container'} - Settings - Raptor</title>
+</svelte:head>
+
 <div class="p-3 md:p-6 max-w-2xl overflow-y-auto h-full">
     {#if container}
         <h2 class="text-base md:text-lg font-semibold text-white mb-3 md:mb-4">Server Settings</h2>

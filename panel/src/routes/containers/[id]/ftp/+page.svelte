@@ -68,6 +68,10 @@
     $: ftpUsername = containerId.slice(0, 8);
 </script>
 
+<svelte:head>
+    <title>{container?.name || 'Container'} - FTP - Raptor</title>
+</svelte:head>
+
 <div class="h-full overflow-y-auto p-6">
     <div class="max-w-2xl mx-auto space-y-6">
         <div>

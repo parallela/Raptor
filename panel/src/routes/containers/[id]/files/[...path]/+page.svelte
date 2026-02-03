@@ -242,6 +242,10 @@
     }));
 </script>
 
+<svelte:head>
+    <title>{fileName || 'File'} - {container?.name || 'Container'} - Raptor</title>
+</svelte:head>
+
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="h-full flex flex-col bg-dark-900">

@@ -45,6 +45,10 @@
     $: usedCpu = daemons.reduce((sum, d) => sum + (d.usedCpu || 0), 0);
 </script>
 
+<svelte:head>
+    <title>{$_('admin.title')} - Raptor</title>
+</svelte:head>
+
 <div class="space-y-6 md:space-y-8">
     <!-- Header -->
     <div>

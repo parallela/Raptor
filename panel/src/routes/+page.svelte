@@ -36,6 +36,10 @@
     $: stoppedCount = containers.filter(c => c.status.toLowerCase() === 'stopped').length;
 </script>
 
+<svelte:head>
+    <title>{$_('dashboard.title')} - Raptor</title>
+</svelte:head>
+
 <div class="space-y-8">
     <!-- Header -->
     <div>

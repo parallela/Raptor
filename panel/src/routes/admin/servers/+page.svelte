@@ -113,6 +113,10 @@
     $: selectedDaemon = daemons.find(d => d.id === newServer.daemonId);
 </script>
 
+<svelte:head>
+    <title>{$_('admin.servers.title')} - Admin - Raptor</title>
+</svelte:head>
+
 <div class="space-y-4 md:space-y-6 max-w-4xl mx-auto">
     <!-- Header -->
     <div class="flex items-center gap-3 md:gap-4">

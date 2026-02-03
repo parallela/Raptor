@@ -63,6 +63,10 @@
     }
 </script>
 
+<svelte:head>
+    <title>{container?.name || 'Container'} - Console - Raptor</title>
+</svelte:head>
+
 <div class="h-full flex flex-col relative">
     <div bind:this={logsContainer} on:scroll={handleScroll} class="flex-1 overflow-y-auto p-2 md:p-4 font-mono text-xs md:text-sm bg-dark-950">
         {#each logs as log}

@@ -317,6 +317,10 @@
     }));
 </script>
 
+<svelte:head>
+    <title>{container?.name || 'Container'} - Files - Raptor</title>
+</svelte:head>
+
 <div class="h-full flex flex-col"
      on:dragenter={handleDragEnter}
      on:dragover={handleDragOver}

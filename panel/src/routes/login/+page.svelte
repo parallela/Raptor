@@ -93,6 +93,10 @@
     }
 </script>
 
+<svelte:head>
+    <title>{$_('auth.login')} - Raptor</title>
+</svelte:head>
+
 <div class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
     <!-- Animated background -->
     <div class="absolute inset-0 overflow-hidden">

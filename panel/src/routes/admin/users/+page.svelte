@@ -83,6 +83,10 @@
     }
 </script>
 
+<svelte:head>
+    <title>{$_('admin.users.title')} - Admin - Raptor</title>
+</svelte:head>
+
 <div class="space-y-4 md:space-y-6">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
