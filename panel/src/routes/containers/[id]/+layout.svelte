@@ -39,6 +39,7 @@
 
     let isPageVisible = true;
     let hasShownConnectedMessage = false;
+    let lastLogTimestamp: number = Date.now();
 
     setContext('container', containerStore);
     setContext('ports', portsStore);
@@ -94,19 +95,24 @@
     });
 
     function handleVisibilityChange() {
-        isPageVisible = !document.hidden;
-
-        if (isPageVisible) {
-            if ($containerStore?.status?.toLowerCase() === 'running') {
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    connectWebSocket(false, true);
-                }
-                if (!statsWs || statsWs.readyState !== WebSocket.OPEN) {
-                    connectStatsWebSocket();
-                }
-            }
-            loadContainer();
+        if (document.hidden) {
+            isPageVisible = false;
+            lastLogTimestamp = Date.now();
+            return;
         }
+
+        isPageVisible = true;
+        const hiddenDuration = Math.ceil((Date.now() - lastLogTimestamp) / 60000) + 1;
+
+        if ($containerStore?.status?.toLowerCase() === 'running') {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                connectWebSocket(false, true, hiddenDuration);
+            }
+            if (!statsWs || statsWs.readyState !== WebSocket.OPEN) {
+                connectStatsWebSocket();
+            }
+        }
+        loadContainer();
     }
 
     async function loadContainer() {
@@ -164,14 +170,14 @@
         };
     }
 
-    function connectWebSocket(clearLogs = false, silent = false) {
+    function connectWebSocket(clearLogs = false, silent = false, sinceMinutes = 30) {
         if (ws) {
             ws.onclose = null;
             ws.close();
             ws = null;
         }
 
-        ws = createWebSocket(containerId);
+        ws = createWebSocket(containerId, sinceMinutes);
         if (!ws) return;
 
         ws.onopen = () => {
@@ -212,8 +218,7 @@
 
             loadContainer().then(() => {
                 if ($containerStore?.status?.toLowerCase() === 'running' && (!ws || ws.readyState === WebSocket.CLOSED)) {
-                    logsStore.update(logs => [...logs, '\x1b[33m● Console connection lost, reconnecting...\x1b[0m']);
-                    wsReconnectTimeout = setTimeout(() => connectWebSocket(false, false), 3000);
+                    wsReconnectTimeout = setTimeout(() => connectWebSocket(false, true, 1), 3000);
                 } else if ($containerStore?.status?.toLowerCase() !== 'running') {
                     logsStore.update(logs => [...logs, '\x1b[31m● Container stopped\x1b[0m']);
                     statsStore.set(null);
