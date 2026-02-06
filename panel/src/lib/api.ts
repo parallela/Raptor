@@ -346,6 +346,33 @@ export const api = {
     updateContainerStartup: (id: string, data: { startupScript?: string; variables?: Record<string, string> }) =>
         request<import('./types').ContainerStartupInfo>(`/containers/${id}/startup`, { method: 'PUT', body: JSON.stringify(data) }),
 
+    downloadFile: (containerId: string, path: string) => {
+        const t = get(token);
+        const apiUrl = getApiUrl();
+        const url = `${apiUrl}/containers/${containerId}/files/download?path=${encodeURIComponent(path)}`;
+        // Use a hidden link to trigger browser download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = path.split('/').pop() || 'download';
+        // We need auth header, so use fetch + blob approach
+        return fetch(url, {
+            headers: { 'Authorization': `Bearer ${t}` }
+        }).then(resp => {
+            if (!resp.ok) throw new Error('Download failed');
+            return resp.blob();
+        }).then(blob => {
+            const blobUrl = URL.createObjectURL(blob);
+            a.href = blobUrl;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+        });
+    },
+
+    fixPermissions: (containerId: string) =>
+        request<{ message: string }>(`/containers/${containerId}/fix-permissions`, { method: 'POST' }),
+
     listDatabases: () => request<any[]>('/databases'),
     getDatabase: (id: string) => request<any>(`/databases/${id}`),
     getAvailableDatabaseTypes: () => request<{ dbType: string; name: string; available: boolean }[]>('/databases/available-types'),

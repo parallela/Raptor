@@ -1553,6 +1553,87 @@ pub async fn delete_file(
     Ok(Json(serde_json::json!({"message": "Deleted successfully"})))
 }
 
+pub async fn download_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(container_name): Path<String>,
+    Query(query): Query<ReadFileQuery>,
+) -> Result<axum::response::Response, StatusCode> {
+    if !verify_api_key(&headers, &state) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let base_path = std::env::var("FTP_BASE_PATH")
+        .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
+            .unwrap_or_else(|_| "/data/raptor".into()));
+    let container_path = std::path::Path::new(&base_path).join("volumes").join(&container_name);
+    let full_path = container_path.join(query.path.trim_start_matches('/'));
+
+    if !full_path.starts_with(&container_path) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let data = tokio::fs::read(&full_path).await.map_err(|_| StatusCode::NOT_FOUND)?;
+    let file_name = full_path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+
+    use axum::response::IntoResponse;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (axum::http::header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", file_name)),
+        ],
+        data,
+    ).into_response())
+}
+
+pub async fn fix_permissions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(container_name): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if !verify_api_key(&headers, &state) {
+        return Err((StatusCode::UNAUTHORIZED, "Unauthorized".into()));
+    }
+
+    let base_path = std::env::var("FTP_BASE_PATH")
+        .unwrap_or_else(|_| std::env::var("SFTP_BASE_PATH")
+            .unwrap_or_else(|_| "/data/raptor".into()));
+    let container_path = std::path::Path::new(&base_path).join("volumes").join(&container_name);
+
+    if !container_path.exists() {
+        return Err((StatusCode::NOT_FOUND, "Container volume not found".into()));
+    }
+
+    // chown -R to the container user (UID/GID 1000, matching the container's internal user)
+    let chown_output = tokio::process::Command::new("chown")
+        .args(["-R", "1000:1000", container_path.to_str().unwrap_or("")])
+        .output()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to run chown: {}", e)))?;
+
+    if !chown_output.status.success() {
+        let stderr = String::from_utf8_lossy(&chown_output.stderr);
+        tracing::warn!("chown stderr: {}", stderr);
+    }
+
+    // chmod -R 755 for dirs, 644 for files
+    let chmod_output = tokio::process::Command::new("chmod")
+        .args(["-R", "u+rwX,g+rX,o+rX", container_path.to_str().unwrap_or("")])
+        .output()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to run chmod: {}", e)))?;
+
+    if !chmod_output.status.success() {
+        let stderr = String::from_utf8_lossy(&chmod_output.stderr);
+        tracing::warn!("chmod stderr: {}", stderr);
+    }
+
+    tracing::info!("Fixed permissions for container volume: {}", container_name);
+    Ok(Json(serde_json::json!({"message": "Permissions fixed successfully"})))
+}
+
 use std::collections::HashMap as StdHashMap;
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;

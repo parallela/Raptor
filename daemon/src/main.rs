@@ -143,6 +143,8 @@ async fn main() -> anyhow::Result<()> {
             .layer(DefaultBodyLimit::max(UPLOAD_CHUNK_BODY_LIMIT)))
         .route("/containers/:name/files/folder", post(handlers::create_folder))
         .route("/containers/:name/files/delete", delete(handlers::delete_file))
+        .route("/containers/:name/files/download", get(handlers::download_file))
+        .route("/containers/:name/fix-permissions", post(handlers::fix_permissions))
 
         .route("/database-servers", get(handlers::list_database_servers))
         .route("/database-servers", post(handlers::create_database_server))

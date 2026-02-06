@@ -60,10 +60,29 @@
         }
     }
 
+    const binaryExtensions = new Set([
+        'jar', 'zip', 'exe', 'tar', 'gz', 'rar', '7z', 'bz2', 'xz', 'zst',
+        'png', 'jpg', 'jpeg', 'gif', 'ico', 'bmp', 'webp', 'svg',
+        'db', 'sqlite', 'class', 'so', 'dll', 'dylib',
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+        'mp3', 'mp4', 'wav', 'avi', 'mkv', 'flv', 'mov',
+        'ttf', 'otf', 'woff', 'woff2', 'eot',
+        'dat', 'bin', 'pak', 'nbt', 'mca', 'mcr', 'region'
+    ]);
+
+    function isBinaryFile(name: string): boolean {
+        const ext = name.split('.').pop()?.toLowerCase() || '';
+        return binaryExtensions.has(ext);
+    }
+
     function navigateTo(file: FileEntry) {
         if (file.isDir) {
             const newPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
             loadFiles(newPath);
+        } else if (isBinaryFile(file.name)) {
+            const filePath = currentPath === '/' ? file.name : `${currentPath.slice(1)}/${file.name}`;
+            api.downloadFile(containerId, filePath)
+                .catch((e: any) => toast.error(e.message || 'Download failed'));
         } else {
             const encodedPath = encodeURIComponent(currentPath === '/' ? file.name : `${currentPath.slice(1)}/${file.name}`);
             goto(`/containers/${containerId}/files/${encodedPath}`);

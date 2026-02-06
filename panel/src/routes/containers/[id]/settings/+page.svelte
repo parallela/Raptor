@@ -32,6 +32,7 @@
     let editVariables: Record<string, string> = {};
     let loadingStartup = false;
     let savingStartup = false;
+    let fixingPermissions = false;
 
     $: containerId = $page.params.id as string;
     $: container = $containerStore;
@@ -99,6 +100,18 @@
             toast.error(e.message || 'Failed to save startup configuration');
         } finally {
             savingStartup = false;
+        }
+    }
+
+    async function fixPermissions() {
+        fixingPermissions = true;
+        try {
+            await api.fixPermissions(containerId);
+            toast.success('Permissions fixed successfully');
+        } catch (e: any) {
+            toast.error(e.message || 'Failed to fix permissions');
+        } finally {
+            fixingPermissions = false;
         }
     }
 
@@ -379,8 +392,19 @@
             <!-- Danger Zone -->
             <div class="card p-3 md:p-4 border-red-500/20">
                 <h3 class="text-xs md:text-sm font-medium text-red-400 mb-2 md:mb-3">Danger Zone</h3>
-                <p class="text-dark-400 text-xs md:text-sm mb-2 md:mb-3">Force kill the server if it's unresponsive.</p>
-                <button on:click={() => showKillModal = true} class="btn-danger text-sm">Kill Server</button>
+                <div class="flex flex-wrap gap-2 md:gap-3">
+                    <div>
+                        <p class="text-dark-400 text-xs md:text-sm mb-2">Fix file ownership and permissions for this server.</p>
+                        <button on:click={fixPermissions} disabled={fixingPermissions} class="btn-secondary text-sm">
+                            {#if fixingPermissions}<span class="spinner w-4 h-4 mr-1"></span>{/if}
+                            Fix Permissions
+                        </button>
+                    </div>
+                    <div>
+                        <p class="text-dark-400 text-xs md:text-sm mb-2">Force kill the server if it's unresponsive.</p>
+                        <button on:click={() => showKillModal = true} class="btn-danger text-sm">Kill Server</button>
+                    </div>
+                </div>
             </div>
         </div>
     {/if}

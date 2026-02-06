@@ -2299,3 +2299,101 @@ pub async fn update_container_startup(
     // Return updated state
     get_container_startup(State(state), Extension(claims), Path(id)).await
 }
+
+pub async fn download_file(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<ReadFileQuery>,
+) -> Result<axum::response::Response, AppError> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if !can_access_container(&claims, &container) {
+        return Err(AppError::Unauthorized);
+    }
+
+    let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
+        .bind(container.daemon_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/files/download?path={}", daemon.base_url(), container.id, query.path);
+
+    let resp = client
+        .get(&url)
+        .header("X-API-Key", &daemon.api_key)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Download error: {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err(AppError::BadRequest("File not found".into()));
+    }
+
+    let headers = resp.headers().clone();
+    let bytes = resp.bytes().await
+        .map_err(|e| AppError::Daemon(format!("Read error: {}", e)))?;
+
+    let content_disposition = headers
+        .get("content-disposition")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("attachment")
+        .to_string();
+
+    use axum::response::IntoResponse;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (axum::http::header::CONTENT_DISPOSITION, content_disposition),
+        ],
+        bytes.to_vec(),
+    ).into_response())
+}
+
+pub async fn fix_permissions(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let is_owner = container.user_id == claims.sub;
+    let is_manager = claims.has_permission("containers.manage") || claims.is_manager();
+
+    if !is_owner && !is_manager {
+        return Err(AppError::Unauthorized);
+    }
+
+    let daemon: crate::models::Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
+        .bind(container.daemon_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let client = daemon_client();
+    let url = format!("{}/containers/{}/fix-permissions", daemon.base_url(), container.id);
+
+    let resp = client
+        .post(&url)
+        .header("X-API-Key", &daemon.api_key)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(format!("Fix permissions error: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let error_text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Daemon(format!("Failed to fix permissions: {}", error_text)));
+    }
+
+    Ok(Json(serde_json::json!({"message": "Permissions fixed successfully"})))
+}
