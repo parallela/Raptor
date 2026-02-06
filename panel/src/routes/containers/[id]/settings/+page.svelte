@@ -281,7 +281,7 @@
                                 bind:value={startupScript}
                                 rows="3"
                                 class="input w-full text-sm font-mono resize-y"
-                                placeholder="e.g., java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar"
+                                placeholder={'e.g., java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar'}
                             ></textarea>
                             <p class="text-dark-500 text-xs mt-1">Use &#123;&#123;VARIABLE&#125;&#125; syntax to reference variables below.</p>
                         </div>
