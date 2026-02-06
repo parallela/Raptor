@@ -342,6 +342,10 @@ export const api = {
     deleteFlake: (id: string) => request<void>(`/flakes/${id}`, { method: 'DELETE' }),
     exportFlake: (id: string) => request<any>(`/flakes/${id}/export`),
 
+    getContainerStartup: (id: string) => request<import('./types').ContainerStartupInfo>(`/containers/${id}/startup`),
+    updateContainerStartup: (id: string, data: { startupScript?: string; variables?: Record<string, string> }) =>
+        request<import('./types').ContainerStartupInfo>(`/containers/${id}/startup`, { method: 'PUT', body: JSON.stringify(data) }),
+
     listDatabases: () => request<any[]>('/databases'),
     getDatabase: (id: string) => request<any>(`/databases/${id}`),
     getAvailableDatabaseTypes: () => request<{ dbType: string; name: string; available: boolean }[]>('/databases/available-types'),

@@ -147,3 +147,20 @@ export interface FlakeVariable {
 export interface FlakeWithVariables extends Flake {
     variables: FlakeVariable[];
 }
+
+export interface ContainerVariableInfo {
+    envVariable: string;
+    name: string;
+    description: string | null;
+    defaultValue: string | null;
+    value: string;
+    userViewable: boolean;
+    userEditable: boolean;
+    rules: string | null;
+    sortOrder: number;
+}
+
+export interface ContainerStartupInfo {
+    startupScript: string | null;
+    variables: ContainerVariableInfo[];
+}

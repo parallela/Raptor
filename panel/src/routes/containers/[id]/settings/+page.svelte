@@ -4,7 +4,7 @@
     import type { Writable } from 'svelte/store';
     import { api } from '$lib/api';
     import toast from 'svelte-french-toast';
-    import type { Container, ContainerAllocation, Allocation } from '$lib/types';
+    import type { Container, ContainerAllocation, Allocation, ContainerVariableInfo } from '$lib/types';
 
     const containerStore = getContext<Writable<Container | null>>('container');
     const allocationsStore = getContext<Writable<ContainerAllocation[]>>('allocations');
@@ -26,6 +26,13 @@
     let settingPrimary = '';
     let copiedField: string | null = null;
 
+    // Startup configuration state
+    let startupScript = '';
+    let startupVariables: ContainerVariableInfo[] = [];
+    let editVariables: Record<string, string> = {};
+    let loadingStartup = false;
+    let savingStartup = false;
+
     $: containerId = $page.params.id as string;
     $: container = $containerStore;
     $: containerAllocations = $allocationsStore;
@@ -41,7 +48,7 @@
     }
 
     onMount(async () => {
-        await loadAllocations();
+        await Promise.all([loadAllocations(), loadStartupConfig()]);
     });
 
     async function loadAllocations() {
@@ -53,6 +60,45 @@
             console.error('Failed to load allocations', e);
         } finally {
             loadingAllocations = false;
+        }
+    }
+
+    async function loadStartupConfig() {
+        loadingStartup = true;
+        try {
+            const data = await api.getContainerStartup(containerId);
+            startupScript = data.startupScript || '';
+            startupVariables = data.variables;
+            editVariables = {};
+            for (const v of data.variables) {
+                editVariables[v.envVariable] = v.value;
+            }
+        } catch (e) {
+            console.error('Failed to load startup config', e);
+        } finally {
+            loadingStartup = false;
+        }
+    }
+
+    async function saveStartupConfig() {
+        savingStartup = true;
+        try {
+            const data = await api.updateContainerStartup(containerId, {
+                startupScript: startupScript,
+                variables: editVariables
+            });
+            startupVariables = data.variables;
+            startupScript = data.startupScript || '';
+            editVariables = {};
+            for (const v of data.variables) {
+                editVariables[v.envVariable] = v.value;
+            }
+            toast.success('Startup configuration saved');
+            await actions.loadContainer();
+        } catch (e: any) {
+            toast.error(e.message || 'Failed to save startup configuration');
+        } finally {
+            savingStartup = false;
         }
     }
 
@@ -217,6 +263,78 @@
                             </div>
                         {/each}
                     </div>
+                {/if}
+            </div>
+
+            <!-- Startup Configuration -->
+            <div class="card p-3 md:p-4">
+                <h3 class="text-xs md:text-sm font-medium text-dark-400 mb-2 md:mb-3">Startup Configuration</h3>
+                {#if loadingStartup}
+                    <div class="text-center py-4"><span class="spinner w-5 h-5"></span></div>
+                {:else}
+                    <form on:submit|preventDefault={saveStartupConfig} class="space-y-3 md:space-y-4">
+                        <!-- Startup Script -->
+                        <div>
+                            <label for="startupScript" class="text-dark-400 text-xs md:text-sm block mb-1">Startup Command</label>
+                            <textarea
+                                id="startupScript"
+                                bind:value={startupScript}
+                                rows="3"
+                                class="input w-full text-sm font-mono resize-y"
+                                placeholder="e.g., java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar"
+                            ></textarea>
+                            <p class="text-dark-500 text-xs mt-1">Use &#123;&#123;VARIABLE&#125;&#125; syntax to reference variables below.</p>
+                        </div>
+
+                        <!-- Flake Variables -->
+                        {#if startupVariables.length > 0}
+                            <div>
+                                <label class="text-dark-400 text-xs md:text-sm block mb-2">Environment Variables</label>
+                                <div class="space-y-2">
+                                    {#each startupVariables as variable}
+                                        {#if variable.userViewable}
+                                            <div class="bg-dark-900/50 rounded-lg p-2 md:p-3">
+                                                <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+                                                    <div class="sm:w-1/3">
+                                                        <span class="text-white text-xs md:text-sm font-medium">{variable.name}</span>
+                                                        <code class="text-dark-500 text-xs ml-1">{variable.envVariable}</code>
+                                                    </div>
+                                                    <div class="sm:w-2/3">
+                                                        {#if variable.userEditable}
+                                                            <input
+                                                                type="text"
+                                                                bind:value={editVariables[variable.envVariable]}
+                                                                class="input w-full text-sm"
+                                                                placeholder={variable.defaultValue || ''}
+                                                            />
+                                                        {:else}
+                                                            <input
+                                                                type="text"
+                                                                value={editVariables[variable.envVariable] || ''}
+                                                                disabled
+                                                                class="input w-full text-sm opacity-50 cursor-not-allowed"
+                                                            />
+                                                        {/if}
+                                                    </div>
+                                                </div>
+                                                {#if variable.description}
+                                                    <p class="text-dark-500 text-xs mt-1">{variable.description}</p>
+                                                {/if}
+                                            </div>
+                                        {/if}
+                                    {/each}
+                                </div>
+                            </div>
+                        {/if}
+
+                        <div class="flex justify-end">
+                            <button type="submit" class="btn-primary text-sm" disabled={savingStartup}>
+                                {#if savingStartup}<span class="spinner w-4 h-4 mr-2"></span>{/if}
+                                Save Startup Config
+                            </button>
+                        </div>
+                    </form>
+                    <p class="text-dark-500 text-xs mt-2 md:mt-3">Note: Startup changes take effect after restarting the server.</p>
                 {/if}
             </div>
 
