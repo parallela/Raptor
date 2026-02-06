@@ -488,6 +488,8 @@ pub struct UpdateContainerRequest {
     pub io_weight: Option<i32>,
     #[serde(default)]
     pub allocation_id: Option<Uuid>,
+    #[serde(default)]
+    pub startup_script: Option<String>,
 }
 
 pub async fn update_container(
@@ -546,6 +548,9 @@ pub async fn update_container(
     if let Some(io) = req.io_weight {
         daemon_payload["ioWeight"] = serde_json::json!(io);
     }
+    if let Some(ref startup) = req.startup_script {
+        daemon_payload["startupScript"] = serde_json::json!(startup);
+    }
 
     let client = daemon_client();
     let daemon_url = format!("{}/containers/{}", daemon.base_url(), container.id);
@@ -568,6 +573,7 @@ pub async fn update_container(
     let disk_limit = req.disk_limit.or(container.disk_limit);
     let swap_limit = req.swap_limit.or(container.swap_limit);
     let io_weight = req.io_weight.or(container.io_weight);
+    let startup_script = req.startup_script.or(container.startup_script.clone());
 
     let updated_container: Container = sqlx::query_as(
         r#"UPDATE containers SET
@@ -576,8 +582,9 @@ pub async fn update_container(
             disk_limit = $3,
             swap_limit = $4,
             io_weight = $5,
+            startup_script = $6,
             updated_at = NOW()
-        WHERE id = $6
+        WHERE id = $7
         RETURNING *"#
     )
     .bind(memory_limit)
@@ -585,6 +592,7 @@ pub async fn update_container(
     .bind(disk_limit)
     .bind(swap_limit)
     .bind(io_weight)
+    .bind(&startup_script)
     .bind(id)
     .fetch_one(&state.db)
     .await?;
@@ -2050,4 +2058,244 @@ pub async fn get_container_stats(
         .map_err(|e| AppError::BadRequest(format!("Parse error: {}", e)))?;
 
     Ok(Json(stats))
+}
+
+// --- Container Variables ---
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerVariableResponse {
+    pub env_variable: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub default_value: Option<String>,
+    pub value: String,
+    pub user_viewable: bool,
+    pub user_editable: bool,
+    pub rules: Option<String>,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerStartupResponse {
+    pub startup_script: Option<String>,
+    pub variables: Vec<ContainerVariableResponse>,
+}
+
+/// GET /containers/:id/startup - returns flake variables with current values + startup script
+pub async fn get_container_startup(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<ContainerStartupResponse>> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if container.user_id != claims.sub && !claims.has_permission("containers.view_all") && !claims.is_manager() {
+        return Err(AppError::Unauthorized);
+    }
+
+    let mut variables: Vec<ContainerVariableResponse> = Vec::new();
+
+    if let Some(flake_id) = container.flake_id {
+        let flake_vars: Vec<crate::handlers::flakes::FlakeVariable> = sqlx::query_as(
+            "SELECT * FROM flake_variables WHERE flake_id = $1 ORDER BY sort_order"
+        )
+            .bind(flake_id)
+            .fetch_all(&state.db)
+            .await?;
+
+        // Get stored container variable values
+        let stored_values: Vec<(Uuid, String)> = sqlx::query_as(
+            "SELECT flake_variable_id, value FROM container_variables WHERE container_id = $1"
+        )
+            .bind(id)
+            .fetch_all(&state.db)
+            .await?;
+
+        let stored_map: HashMap<Uuid, String> = stored_values.into_iter().collect();
+
+        // If no stored values, try to get current values from daemon
+        let daemon_env = if stored_map.is_empty() {
+            get_daemon_environment(&state, &container).await.unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
+        for var in &flake_vars {
+            let value = stored_map.get(&var.id)
+                .cloned()
+                .or_else(|| daemon_env.get(&var.env_variable).cloned())
+                .unwrap_or_else(|| var.default_value.clone().unwrap_or_default());
+
+            variables.push(ContainerVariableResponse {
+                env_variable: var.env_variable.clone(),
+                name: var.name.clone(),
+                description: var.description.clone(),
+                default_value: var.default_value.clone(),
+                value,
+                user_viewable: var.user_viewable,
+                user_editable: var.user_editable,
+                rules: var.rules.clone(),
+                sort_order: var.sort_order,
+            });
+        }
+    }
+
+    Ok(Json(ContainerStartupResponse {
+        startup_script: container.startup_script,
+        variables,
+    }))
+}
+
+/// Fetch current environment from daemon for existing containers without stored variables
+async fn get_daemon_environment(
+    state: &AppState,
+    container: &Container,
+) -> Result<HashMap<String, String>, AppError> {
+    let daemon: Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
+        .bind(container.daemon_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let client = daemon_client();
+    let url = format!("{}/containers/{}", daemon.base_url(), container.id);
+
+    let resp = client
+        .get(&url)
+        .header("X-API-Key", &daemon.api_key)
+        .send()
+        .await
+        .map_err(|e| AppError::Daemon(e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Ok(HashMap::new());
+    }
+
+    let data: serde_json::Value = resp.json().await.unwrap_or_default();
+    let mut env = HashMap::new();
+    if let Some(obj) = data.get("environment").and_then(|e| e.as_object()) {
+        for (k, v) in obj {
+            env.insert(k.clone(), v.as_str().unwrap_or("").to_string());
+        }
+    }
+    Ok(env)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateContainerStartupRequest {
+    #[serde(default)]
+    pub startup_script: Option<String>,
+    #[serde(default)]
+    pub variables: Option<HashMap<String, String>>,
+}
+
+/// PUT /containers/:id/startup - update variables and/or startup script
+pub async fn update_container_startup(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateContainerStartupRequest>,
+) -> AppResult<Json<ContainerStartupResponse>> {
+    let container: Container = sqlx::query_as("SELECT * FROM containers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let is_owner = container.user_id == claims.sub;
+    let is_manager = claims.has_permission("containers.manage") || claims.is_manager();
+
+    if !is_owner && !is_manager {
+        return Err(AppError::Unauthorized);
+    }
+
+    let daemon: Daemon = sqlx::query_as("SELECT * FROM daemons WHERE id = $1")
+        .bind(container.daemon_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let mut daemon_payload = serde_json::json!({});
+
+    // Update startup script in DB and daemon
+    if let Some(ref startup) = req.startup_script {
+        sqlx::query("UPDATE containers SET startup_script = $1, updated_at = NOW() WHERE id = $2")
+            .bind(startup)
+            .bind(id)
+            .execute(&state.db)
+            .await?;
+        daemon_payload["startupScript"] = serde_json::json!(startup);
+    }
+
+    // Update variables
+    if let Some(ref variables) = req.variables {
+        if let Some(flake_id) = container.flake_id {
+            let flake_vars: Vec<crate::handlers::flakes::FlakeVariable> = sqlx::query_as(
+                "SELECT * FROM flake_variables WHERE flake_id = $1 ORDER BY sort_order"
+            )
+                .bind(flake_id)
+                .fetch_all(&state.db)
+                .await?;
+
+            let mut env_updates: HashMap<String, String> = HashMap::new();
+
+            for var in &flake_vars {
+                if let Some(new_value) = variables.get(&var.env_variable) {
+                    // Only allow editing user_editable vars (unless manager)
+                    if !var.user_editable && !is_manager {
+                        continue;
+                    }
+
+                    // Upsert into container_variables
+                    sqlx::query(
+                        r#"INSERT INTO container_variables (id, container_id, flake_variable_id, value, created_at, updated_at)
+                           VALUES ($1, $2, $3, $4, NOW(), NOW())
+                           ON CONFLICT (container_id, flake_variable_id)
+                           DO UPDATE SET value = $4, updated_at = NOW()"#
+                    )
+                        .bind(Uuid::new_v4())
+                        .bind(id)
+                        .bind(var.id)
+                        .bind(new_value)
+                        .execute(&state.db)
+                        .await?;
+
+                    env_updates.insert(var.env_variable.clone(), new_value.clone());
+                }
+            }
+
+            if !env_updates.is_empty() {
+                daemon_payload["environment"] = serde_json::json!(env_updates);
+            }
+        }
+    }
+
+    // Send updates to daemon
+    if daemon_payload.as_object().map_or(false, |o| !o.is_empty()) {
+        let client = daemon_client();
+        let daemon_url = format!("{}/containers/{}", daemon.base_url(), container.id);
+
+        let res = client
+            .patch(&daemon_url)
+            .header("X-API-Key", &daemon.api_key)
+            .json(&daemon_payload)
+            .send()
+            .await
+            .map_err(|e| AppError::Daemon(e.to_string()))?;
+
+        if !res.status().is_success() {
+            let error_text = res.text().await.unwrap_or_default();
+            tracing::warn!("Daemon startup update warning: {}", error_text);
+        }
+    }
+
+    // Return updated state
+    get_container_startup(State(state), Extension(claims), Path(id)).await
 }

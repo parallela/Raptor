@@ -411,6 +411,16 @@ pub async fn update_container(
         container.allocations = allocations;
     }
 
+    if let Some(env) = req.environment {
+        for (key, value) in env {
+            container.environment.insert(key, value);
+        }
+    }
+
+    if let Some(startup) = req.startup_script {
+        container.startup_script = Some(startup);
+    }
+
     if let Err(e) = state.docker.update_container_resources(
         &container.docker_id,
         &container.resources,

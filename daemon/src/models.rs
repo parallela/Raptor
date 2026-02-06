@@ -253,6 +253,10 @@ pub struct UpdateContainerRequest {
     pub allocations: Option<Vec<ContainerAllocation>>,
     #[serde(default)]
     pub ports: Option<Vec<PortMapping>>,
+    #[serde(default)]
+    pub environment: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub startup_script: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

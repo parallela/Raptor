@@ -76,6 +76,7 @@ pub struct Container {
     pub id: Uuid,
     pub user_id: Uuid,
     pub daemon_id: Uuid,
+    pub flake_id: Option<Uuid>,
     pub name: String,
     pub image: String,
     pub startup_script: Option<String>,

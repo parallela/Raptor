@@ -7,7 +7,7 @@ mod models;
 mod seeder;
 
 use axum::{
-    routing::{get, post, delete, patch},
+    routing::{get, post, delete, patch, put},
     middleware as axum_middleware,
     Router,
     extract::DefaultBodyLimit,
@@ -82,6 +82,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/containers/:id", patch(handlers::containers::update_container))
         .route("/containers/:id/ports", get(handlers::containers::get_container_ports))
         .route("/containers/:id/stats", get(handlers::containers::get_container_stats))
+        .route("/containers/:id/startup", get(handlers::containers::get_container_startup))
+        .route("/containers/:id/startup", put(handlers::containers::update_container_startup))
         .route("/containers/:id/allocation", post(handlers::containers::assign_allocation))
         .route("/containers/:id/allocations", get(handlers::containers::get_container_allocations))
         .route("/containers/:id/allocations/available", get(handlers::containers::get_available_allocations))
